@@ -2,13 +2,16 @@ package cf.timsprojekte.verwaltung;
 
 import cf.timsprojekte.UniqueBot;
 import cf.timsprojekte.verwaltung.immutable.Statistik;
-import org.jfree.chart.ChartFactory;
-import org.jfree.chart.JFreeChart;
+import org.jfree.chart.*;
+import org.jfree.chart.plot.PlotOrientation;
+import org.jfree.chart.renderer.category.*;
+import org.jfree.chart.ui.RectangleInsets;
 import org.jfree.data.category.DefaultCategoryDataset;
 import org.jfree.data.general.DefaultPieDataset;
 import org.telegram.abilitybots.api.db.DBContext;
 
 import javax.validation.constraints.NotNull;
+import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.util.Optional;
 import java.util.Set;
@@ -20,6 +23,27 @@ public class Statistikverwaltung {
 
     public Statistikverwaltung(DBContext db) {
         statistikSet = db.getSet("Statistik");
+        StandardChartTheme theme = new StandardChartTheme("Custom", false);
+        /*Font fonts[] = GraphicsEnvironment.getLocalGraphicsEnvironment().getAllFonts();
+        Font font = null;
+        for (int i = 0; i < fonts.length; i++) {
+            if (fonts[i].getName().equals("Comic Sans MS"))
+                font = fonts[i];
+        }*/
+        String fontName = "Comic Sans MS";
+        theme.setBarPainter(new GradientBarPainter());
+        theme.setTitlePaint( Color.decode( "#4572a7" ) );
+        theme.setExtraLargeFont( new Font(fontName,Font.PLAIN, 16) );
+        theme.setLargeFont( new Font(fontName,Font.BOLD, 15));
+        theme.setRegularFont( new Font(fontName,Font.PLAIN, 11));
+        theme.setRangeGridlinePaint( Color.decode("#C0C0C0"));
+        theme.setPlotBackgroundPaint( Color.decode("#FFFFFF") );
+        theme.setChartBackgroundPaint( Color.decode("#FFFFFF"));
+        theme.setGridBandPaint( Color.red );
+        theme.setAxisOffset( new RectangleInsets(0,0,0,0) );
+        theme.setBarPainter(new StandardBarPainter());
+        theme.setAxisLabelPaint( Color.decode("#666666")  );
+        ChartFactory.setChartTheme(theme);
     }
 
     public Statistik getStatistik(long userId) {
@@ -165,11 +189,11 @@ public class Statistikverwaltung {
     }
 
     public BufferedImage generateLikeInPie() {
-        return generatePie("Ehrungen gesendet", Statistik::getLikeIn);
+        return generatePie("Ehrungen empfangen", Statistik::getLikeIn);
     }
 
     public BufferedImage generateLikeOutPie() {
-        return generatePie("Ehrungen empfangen", Statistik::getLikeOut);
+        return generatePie("Ehrungen gesendet", Statistik::getLikeOut);
     }
 
     private BufferedImage generatePie(String titel, Function<Statistik, Integer> function) {
@@ -177,8 +201,7 @@ public class Statistikverwaltung {
         Nutzerverwaltung n = UniqueBot.unique().nutzerverwaltung;
         statistikSet.forEach(statistik -> data.insertValue(0, n.getBenutzer(statistik.getUserId()).getNutzername(), function.apply(statistik)));
         JFreeChart chart = ChartFactory.createPieChart(titel, data);
-        BufferedImage image = chart.createBufferedImage(600, 600);
-        return image;
+        return chart.createBufferedImage(600, 600);
     }
 
     public BufferedImage generateWeekBars() {
@@ -193,9 +216,8 @@ public class Statistikverwaltung {
             data.addValue(statistik.getSaturaday(), n.getBenutzer(statistik.getUserId()).getNutzername(), "Samstag");
             data.addValue(statistik.getSunday(), n.getBenutzer(statistik.getUserId()).getNutzername(), "Sonntag");
         }
-        JFreeChart chart = ChartFactory.createBarChart("Wochenverteilung", "Tag", "Nachrichten", data);
-        BufferedImage image = chart.createBufferedImage(600, 600);
-        return image;
+        JFreeChart chart = ChartFactory.createStackedBarChart("Wochenverteilung", "Tag", "Nachrichten", data);
+        return chart.createBufferedImage(600, 600);
     }
 
     public BufferedImage generateTimeBars() {
@@ -207,8 +229,18 @@ public class Statistikverwaltung {
             data.addValue(statistik.getEvening(), n.getBenutzer(statistik.getUserId()).getNutzername(), "Abends");
             data.addValue(statistik.getNight(), n.getBenutzer(statistik.getUserId()).getNutzername(), "Nachts");
         }
-        JFreeChart chart = ChartFactory.createBarChart("Tagesverteilung", "Tageszeit", "Nachrichten", data);
-        BufferedImage image = chart.createBufferedImage(600, 600);
-        return image;
+        JFreeChart chart = ChartFactory.createStackedBarChart("Tagesverteilung", "Tageszeit", "Nachrichten", data);
+        return chart.createBufferedImage(600, 600);
+    }
+
+    @SuppressWarnings("Duplicates")
+    public BufferedImage generateTestDiagram() {
+        DefaultCategoryDataset data = new DefaultCategoryDataset();
+        Nutzerverwaltung n = UniqueBot.unique().nutzerverwaltung;
+        for (Statistik statistik : statistikSet) {
+            data.addValue(Math.max(n.getBenutzer(statistik.getUserId()).getNextBelohnung() - System.currentTimeMillis(), 0) / 1000, "Cooldown", n.getBenutzer(statistik.getUserId()).getNutzername());
+        }
+        JFreeChart chart = ChartFactory.createBarChart("Zeit bis zu nächsten Belohnung", "Nutzer", "Sekunden", data, PlotOrientation.HORIZONTAL, false, true, false);
+        return chart.createBufferedImage(600, 600);
     }
 }

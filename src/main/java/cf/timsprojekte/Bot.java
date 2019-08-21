@@ -153,6 +153,8 @@ public class Bot extends AbilityBot {
                         img = statistikverwaltung.generateLikeInPie();
                     } else if (ctx.firstArg().equalsIgnoreCase("honorOut")) {
                         img = statistikverwaltung.generateLikeOutPie();
+                    } else if (ctx.firstArg().equalsIgnoreCase("test")) {
+                        img = statistikverwaltung.generateTestDiagram();
                     } else {
                         return;
                     }
