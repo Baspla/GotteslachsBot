@@ -19,8 +19,10 @@ import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
+import java.io.*;
 import java.io.File;
-import java.io.IOException;
+import java.net.MalformedURLException;
+import java.net.URL;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 
@@ -227,6 +229,45 @@ public class Bot extends AbilityBot {
                         boolean switched = !gruppe.getIsAusgabe();
                         gruppenverwaltung.setGruppeIsAusgabe(gruppe, switched);
                         silent.send("Ausgabe in der Gruppe " + (switched ? "aktiviert." : "deaktiviert."), ctx.chatId());
+                    }
+                })
+                .build();
+    }
+
+    @SuppressWarnings("unused")
+    public Ability cmdIP() {
+        return Ability.builder()
+                .name("ip")
+                .privacy(ADMIN)
+                .locality(ALL)
+                .input(0)
+                .action(ctx -> {
+                    logger.debug("IP Command");
+                    URL whatsmyip;
+                    try {
+                        whatsmyip = new URL("http://checkip.amazonaws.com");
+                    } catch (MalformedURLException e) {
+                        e.printStackTrace();
+                        return;
+                    }
+                    InputStream stream;
+                    try {
+                        stream = whatsmyip.openStream();
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                        return;
+                    }
+                    BufferedReader in = new BufferedReader(new InputStreamReader(stream));
+                    try {
+                        String ip = in.readLine();
+                        silent.send("IP: " + ip, ctx.chatId());
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+                    try {
+                        in.close();
+                    } catch (IOException ex) {
+                        ex.printStackTrace();
                     }
                 })
                 .build();

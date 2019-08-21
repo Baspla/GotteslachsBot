@@ -1,5 +1,7 @@
 package cf.timsprojekte.verwaltung.immutable;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 import java.io.Serializable;
 import java.util.Objects;
 
@@ -10,7 +12,7 @@ public class Abzeichen implements Serializable {
     private final String name;
     private final String beschreibung;
 
-    public Abzeichen(int abzeichenId, int belohnung, String name, String beschreibung) {
+    public Abzeichen(@JsonProperty("abzeichenId") int abzeichenId,@JsonProperty("belohnung")  int belohnung,@JsonProperty("name")  String name,@JsonProperty("beschreibung")  String beschreibung) {
         this.abzeichenId = abzeichenId;
         this.belohnung = belohnung;
         this.name = name;
