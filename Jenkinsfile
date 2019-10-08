@@ -1,9 +1,17 @@
 pipeline {
   agent any
   stages {
-    stage('Test MSG') {
+    stage('A') {
       steps {
-        echo 'Test'
+        build 'install'
+      }
+    }
+    stage('B') {
+      steps {
+        retry(count: 2) {
+          echo 'Hey'
+        }
+
       }
     }
   }
