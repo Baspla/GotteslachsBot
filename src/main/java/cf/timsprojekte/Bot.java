@@ -7,6 +7,7 @@ import cf.timsprojekte.dialoge.shop.ShopDialog;
 import cf.timsprojekte.verwaltung.*;
 import cf.timsprojekte.verwaltung.immutable.*;
 import org.apache.log4j.*;
+
 import org.telegram.abilitybots.api.bot.AbilityBot;
 import org.telegram.abilitybots.api.objects.*;
 import org.telegram.abilitybots.api.sender.SilentSender;
