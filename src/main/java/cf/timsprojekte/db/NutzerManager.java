@@ -59,4 +59,8 @@ public class NutzerManager {
     private List<Nutzer> getNutzerListe() {
         return new ArrayList<>(map.values());
     }
+
+    public boolean hasNutzer(Integer user) {
+        return map.containsKey(user);
+    }
 }

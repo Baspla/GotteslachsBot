@@ -1,12 +1,14 @@
 package cf.timsprojekte.db;
 
-import com.fasterxml.jackson.annotation.JsonIgnore;
+import cf.timsprojekte.Ausgabe;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.io.Serializable;
 import java.time.Instant;
 import java.time.temporal.TemporalUnit;
 import java.util.Locale;
+
+import cf.timsprojekte.LevelManager;
 
 public class Nutzer implements Serializable {
 
@@ -19,12 +21,19 @@ public class Nutzer implements Serializable {
     private Integer userId;
     @JsonProperty
     private Integer points;
+    @JsonProperty
+    private String lang_language;
+    @JsonProperty
+    private String lang_country;
+    @JsonProperty
+    private String lang_variant;
 
     private transient Instant cooldownSuperUpvote = Instant.now();
     private transient Instant cooldownUpvote = Instant.now();
     private transient Instant cooldownDownvote = Instant.now();
     private transient Instant cooldownReward = Instant.now();
     private transient NutzerManager nutzerManager;
+
 
     public Nutzer(Integer userId, String username, int points, int votes) {
         this.userId = userId;
@@ -65,29 +74,40 @@ public class Nutzer implements Serializable {
         this.points = points;
     }
 
-    private String getTitel() {
-        return "Ehrenbruder";
-        //TODO
+    public String getTitel() {
+        return LevelManager.getTitelForPoints(getPoints(), getLocale());
     }
 
     public void addPoints(int points) {
         setPoints(getPoints() + points);
     }
 
-    public String getLinkedStringVotes() {
-        return "<a href=\"tg://user?id=" + getUserId() + "\">" + getUsername() + "</a> (<code>" + getVotes() + "</code>)";
+    private Integer getPointsNextLevel() {
+        return LevelManager.getZiel(getLevel());
     }
 
-    public String getLinkedString() {
-        return getTitel() + " <a href=\"tg://user?id=" + getUserId() + "\">" + getUsername() + "</a>";
+    public String getLinkedVotes() {
+        return Ausgabe.format(getLocale(),"user.namevotes",getVotes(),getUserId(),getUsername());
     }
 
-    public String getLinkedStringPointList() {
-        return " <code>" + String.format("% 5d", getPoints()) + "</code> <b>" + getTitel() + "</b> <a href=\"tg://user?id=" + getUserId() + "\">" + getUsername() + "</a>";
+    public String getLinkedPoints() {
+        return Ausgabe.format(getLocale(),"user.titlenamepoints",getVotes(),getUserId(),getUsername());
     }
 
-    public String getLinkedStringVoteList() {
-        return "<code>" + String.format("% 4d", getVotes()) + " Ehre</code> - <a href=\"tg://user?id=" + getUserId() + "\">" + getUsername() + "</a>";
+    public String getLinkedTitleUsername() {
+        return Ausgabe.format(getLocale(),"user.titlename",getVotes(),getUserId(),getUsername());
+    }
+
+    public String getLinkedUsername() {
+        return Ausgabe.format(getLocale(),"user.name",getVotes(),getUserId(),getUsername());
+    }
+
+    public String getLinkedPointListEntry() {
+        return Ausgabe.format(getLocale(),"user.entry.points",getVotes(),getUserId(),getUsername());
+    }
+
+    public String getLinkedVoteListEntry() {
+        return Ausgabe.format(getLocale(),"user.entry.votes",getVotes(),getUserId(),getUsername());
     }
 
     public void removeVote(int i) {
@@ -155,6 +175,25 @@ public class Nutzer implements Serializable {
     }
 
     public Locale getLocale() {
-        return new Locale("de","DE","brudi");
+        if (lang_language != null && !lang_language.isEmpty())
+            if (lang_country != null && !lang_country.isEmpty())
+                if (lang_variant != null && !lang_variant.isEmpty())
+                    return new Locale(lang_language, lang_country, lang_variant);
+                else
+                    return new Locale(lang_language, lang_country);
+            else
+                return new Locale(lang_language);
+        else
+            return Locale.getDefault();
+    }
+
+    public void setLocale(String language, String country, String variant) {
+        lang_language = language;
+        lang_country = country;
+        lang_variant = variant;
+    }
+
+    public int getLevel() {
+        return LevelManager.getLevel(getPoints());
     }
 }

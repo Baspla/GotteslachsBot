@@ -37,7 +37,7 @@ public class Bot extends AbilityBot {
     private static final int NACHRICHT_COOLDOWN_MAX = 4;
     private static final int JACKPOT_MULTIPLIER = 10;
     private static final boolean ANNOUNCE_STARTUP = true;
-    private static final boolean ANNOUNCE_REWARDS = true;
+    private static final boolean ANNOUNCE_REWARDS = false;
     private final Logger logger;
     @SuppressWarnings({"FieldCanBeLocal", "unused"})
     private final Map<Integer, Nutzer> mapNutzer;
@@ -75,7 +75,7 @@ public class Bot extends AbilityBot {
         random = new Random();
         uncheckedGroups = new ArrayList<>();
         nutzermanager = new NutzerManager(mapNutzer, users());
-        ausgabe = new Ausgabe(creatorId(), listGroups, silent, new Locale("de", "DE"));
+        ausgabe = new Ausgabe(creatorId(), listGroups, silent, new Locale("de", "DE"), sender);
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             logger.info("ShutdownHook");
             nutzermanager.saveNutzer();
@@ -98,18 +98,20 @@ public class Bot extends AbilityBot {
             e.printStackTrace();
         }
         if (ANNOUNCE_STARTUP)
-            ausgabe.sendToAllGroups("status_gestartet", null);
+            ausgabe.sendToAllGroups("system.started", null);
     }
 
-    @SuppressWarnings("unused")
+    @SuppressWarnings({"unused", "unchecked"})
     public Ability cmdStats() {
         return Ability.builder()
                 .name("stats")
+                .flag(update -> nutzermanager.hasNutzer(AbilityUtils.getUser((Update) update).getId()))
                 .privacy(PUBLIC)
                 .locality(USER)
                 .input(0)
                 .action(ctx -> {
-                    //TODO
+                    Nutzer nutzer = nutzermanager.getNutzer(ctx.user().getId());
+                    ausgabe.send(ctx.chatId(), nutzer.getLocale(), "user.stats", nutzer.getUserId(), nutzer.getUsername(), nutzer.getPoints(), nutzer.getVotes(), nutzer.getLocale().toLanguageTag());//TODO
                 })
                 .build();
     }
@@ -138,7 +140,7 @@ public class Bot extends AbilityBot {
                 .locality(ALL)
                 .input(0)
                 .action(ctx -> {
-                    ausgabe.send(ctx.chatId(), nutzermanager.getNutzer(ctx.user().getId()).getLocale(), "status_shutdown", null);
+                    ausgabe.send(ctx.chatId(), nutzermanager.getNutzer(ctx.user().getId()).getLocale(), "system.shutdown", null);
                     nutzermanager.saveNutzer();
                     db.commit();
                     System.exit(0);
@@ -155,10 +157,10 @@ public class Bot extends AbilityBot {
                 .locality(ALL)
                 .input(0)
                 .action(ctx -> {
-                    Optional<Message> r = ausgabe.send(ctx.chatId(), nutzermanager.getNutzer(ctx.user().getId()).getLocale(), "status_save", null);
+                    Optional<Message> r = ausgabe.send(ctx.chatId(), nutzermanager.getNutzer(ctx.user().getId()).getLocale(), "system.saving", null);
                     nutzermanager.saveNutzer();
                     db.commit();
-                    r.ifPresent(message -> ausgabe.edit(message.getChatId(), message.getMessageId(), nutzermanager.getNutzer(ctx.user().getId()).getLocale(), "status_saved", null));
+                    r.ifPresent(message -> ausgabe.edit(message.getChatId(), message.getMessageId(), nutzermanager.getNutzer(ctx.user().getId()).getLocale(), "system.saved", null));
                 })
                 .build();
     }
@@ -175,7 +177,7 @@ public class Bot extends AbilityBot {
                     logger.debug("Top Points abgefragt");
                     List<Nutzer> topList = nutzermanager.getNutzerListeTopPoints(10);
                     StringBuilder msg = new StringBuilder("Top-Liste:\n");
-                    topList.forEach(entry -> msg.append(entry.getLinkedStringPointList()).append("\n"));
+                    topList.forEach(entry -> msg.append(entry.getLinkedPointListEntry()).append("\n"));
                     ausgabe.sendRaw(ctx.chatId(), msg.toString());
                 })
                 .build();
@@ -193,7 +195,7 @@ public class Bot extends AbilityBot {
                     logger.debug("Top Rep abgefragt");
                     List<Nutzer> topList = nutzermanager.getNutzerListeTopVotes(10);
                     StringBuilder msg = new StringBuilder("Top-Liste:\n");
-                    topList.forEach(entry -> msg.append(entry.getLinkedStringVoteList()).append("\n"));
+                    topList.forEach(entry -> msg.append(entry.getLinkedVoteListEntry()).append("\n"));
                     ausgabe.sendRaw(ctx.chatId(), msg.toString());
                 })
                 .build();
@@ -237,13 +239,13 @@ public class Bot extends AbilityBot {
                 listGroups.add(chatId);
                 ausgabe.answerCallback(update.getCallbackQuery().getId());
                 ausgabe.removeMessage(update.getCallbackQuery().getMessage().getChatId(), update.getCallbackQuery().getMessage().getMessageId());
-                ausgabe.sendToGroup(chatId, "group_accepted", null);
+                ausgabe.sendToGroup(chatId, "group.accepted", null);
             } else if (data.startsWith("adm-")) {
                 if (!update.getCallbackQuery().getFrom().getId().equals(creatorId())) return;
                 long chatId = Long.parseLong(data.substring(4));
                 if (!uncheckedGroups.contains(chatId)) return;
                 uncheckedGroups.remove(chatId);
-                ausgabe.sendToGroup(chatId, "group_declined", null);
+                ausgabe.sendToGroup(chatId, "group.declined", null);
                 try {
                     sender.execute(new LeaveChat().setChatId(chatId));
                 } catch (TelegramApiException e) {
@@ -264,7 +266,7 @@ public class Bot extends AbilityBot {
                 if (uncheckedGroups.contains(message.getChatId())) return;
                 uncheckedGroups.add(message.getChatId());
                 ausgabe.sendOwnerGroupCheck(message.getChatId(), message.getChat().getTitle());
-                ausgabe.sendToGroup(message.getChatId(), "group_requested", null);
+                ausgabe.sendToGroup(message.getChatId(), "group.requested", null);
                 return;
             }
 
@@ -277,7 +279,7 @@ public class Bot extends AbilityBot {
                         if (!nutzer.hasCooldownUpvote() && startsOrEndsWith(message.getText(), "\\u002b|\\u261d|\\ud83d\\udc46|\\ud83d\\udc4f|\\ud83d\\ude18|\\ud83d\\ude0d|\\ud83d\\udc4c|\\ud83d\\udc4d|\\ud83d\\ude38")) {
                             ziel.addVote(1);
                             nutzer.setCooldownUpvote(5, ChronoUnit.MINUTES);
-                            ausgabe.sendTempClear(message.getChatId(), nutzer.getLocale(), "vote_up", new Object[]{1, ziel.getLinkedStringVotes(), nutzer.getLinkedStringVotes()});
+                            ausgabe.sendTempClear(message.getChatId(), nutzer.getLocale(), "vote.up", 1, ziel.getLinkedVotes(), nutzer.getLinkedVotes());
                         }
 
                         //Prüft ob die Nachricht ein Super-Upvote enthält
@@ -285,14 +287,14 @@ public class Bot extends AbilityBot {
                             int points = 2 + random.nextInt(SUPER_HONOR_MAX - 1);
                             ziel.addVote(points);
                             nutzer.setCooldownSuperUpvote(5, ChronoUnit.HOURS);
-                            ausgabe.sendTempClear(message.getChatId(), nutzer.getLocale(), "vote_super", new Object[]{points, ziel.getLinkedStringVotes(), nutzer.getLinkedStringVotes()});
+                            ausgabe.sendTempClear(message.getChatId(), nutzer.getLocale(), "vote.super", points, ziel.getLinkedVotes(), nutzer.getLinkedVotes());
                         }
 
                         //Prüft ob die Nachricht ein Downvote enthält
                         if (!nutzer.hasCooldownDownvote() && startsOrEndsWith(message.getText(), "\\u2639\\ufe0f|\\ud83d\\ude20|\\ud83d\\ude21|\\ud83e\\udd2c|\\ud83e\\udd2e|\\ud83d\\udca9|\\ud83d\\ude3e|\\ud83d\\udc4e|\\ud83d\\udc47")) {
                             ziel.removeVote(1);
                             nutzer.setCooldownDownvote(10, ChronoUnit.MINUTES);
-                            ausgabe.sendTempClear(message.getChatId(), nutzer.getLocale(), "vote_down", new Object[]{1, ziel.getLinkedStringVotes(), nutzer.getLinkedStringVotes()});
+                            ausgabe.sendTempClear(message.getChatId(), nutzer.getLocale(), "vote.down", 1, ziel.getLinkedVotes(), nutzer.getLinkedVotes());
                         }
                     }
                 }
@@ -303,13 +305,17 @@ public class Bot extends AbilityBot {
                 int reward = (r.nextInt(NACHRICHT_PUNKTE_MAX) + NACHRICHT_PUNKTE_MIN);
                 if (random.nextInt(JACKPOT_CHANCE) == 0) {
                     reward = reward * JACKPOT_MULTIPLIER;
-                    ausgabe.sendToAllGroups("reward_jackpot", new Object[]{reward, nutzer.getLinkedString()});
-                } else {
-                    nutzer.addPoints(r.nextInt(NACHRICHT_PUNKTE_MAX) + NACHRICHT_PUNKTE_MIN);
-                    if (ANNOUNCE_REWARDS)
-                        ausgabe.sendTempClear(message.getChatId(), nutzer.getLocale(), "reward", new Object[]{reward, nutzer.getLinkedString()});
+                    ausgabe.sendToAllGroups("reward.jackpot", reward, nutzer.getLinkedUsername());
                 }
+                int levelVorher = nutzer.getLevel();
                 nutzer.addPoints(reward);
+                if (levelVorher < nutzer.getLevel()) {
+                    if (levelVorher == nutzer.getLevel() - 1) {
+                        ausgabe.sendImage(message.getChatId(), nutzer.getLocale(), "levelup.single", "smug.moe/smg/" + nutzer.getLevel() + ".png", nutzer.getLinkedUsername(), nutzer.getTitel());
+                    } else {
+                        ausgabe.sendImage(message.getChatId(), nutzer.getLocale(), "levelup.multi", "smug.moe/smg/" + nutzer.getLevel() + ".png", nutzer.getLinkedUsername(), nutzer.getTitel(), nutzer.getLevel() - levelVorher - 1);
+                    }
+                }
                 nutzer.setCooldownReward(r.nextInt(NACHRICHT_COOLDOWN_MAX) + NACHRICHT_COOLDOWN_MIN, ChronoUnit.MINUTES);
             }
 
