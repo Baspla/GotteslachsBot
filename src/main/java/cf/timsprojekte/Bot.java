@@ -1,63 +1,60 @@
 package cf.timsprojekte;
 
-import cf.timsprojekte.dialoge.admin.AdminMainDialog;
-import cf.timsprojekte.dialoge.casino.CasinoDialog;
-import cf.timsprojekte.dialoge.settings.SettingsDialog;
-import cf.timsprojekte.dialoge.shop.ShopDialog;
-import cf.timsprojekte.verwaltung.*;
-import cf.timsprojekte.verwaltung.immutable.*;
+import cf.timsprojekte.db.Nutzer;
+import cf.timsprojekte.db.NutzerManager;
 import org.apache.log4j.*;
+import org.mapdb.DBMaker;
+import org.springframework.stereotype.Component;
 import org.telegram.abilitybots.api.bot.AbilityBot;
+import org.telegram.abilitybots.api.db.MapDBContext;
 import org.telegram.abilitybots.api.objects.*;
-import org.telegram.abilitybots.api.sender.SilentSender;
 import org.telegram.abilitybots.api.util.AbilityUtils;
-import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
-import org.telegram.telegrambots.meta.api.methods.send.SendPhoto;
-import org.telegram.telegrambots.meta.api.methods.updatingmessages.DeleteMessage;
+import org.telegram.telegrambots.meta.TelegramBotsApi;
+import org.telegram.telegrambots.meta.api.methods.groupadministration.LeaveChat;
 import org.telegram.telegrambots.meta.api.objects.*;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
+import org.telegram.telegrambots.meta.exceptions.TelegramApiRequestException;
 
-import javax.imageio.ImageIO;
-import java.awt.image.BufferedImage;
-import java.io.*;
-import java.io.File;
-import java.net.MalformedURLException;
-import java.net.URL;
+import javax.annotation.PostConstruct;
+import java.io.IOException;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 
-import static org.telegram.abilitybots.api.objects.Locality.*;
+import static org.telegram.abilitybots.api.objects.Locality.ALL;
+import static org.telegram.abilitybots.api.objects.Locality.USER;
 import static org.telegram.abilitybots.api.objects.Privacy.ADMIN;
 import static org.telegram.abilitybots.api.objects.Privacy.PUBLIC;
 
+@Component
 public class Bot extends AbilityBot {
 
-    private static final int START_PUNKTE = 0;
+    private static final int JACKPOT_CHANCE = 1000;
+    private static final int SUPER_HONOR_MAX = 5;
     private static final int NACHRICHT_PUNKTE_MIN = 1;
     private static final int NACHRICHT_PUNKTE_MAX = 12;
     private static final int NACHRICHT_COOLDOWN_MIN = 1;
     private static final int NACHRICHT_COOLDOWN_MAX = 4;
-    private static final int HONOR_POINTS = 10;
-    private static final int JACKPOT = 7000;
-    private static final int JACKPOT_MULTIPLYER = 10;
-    private static final long LIKE_COOLDOWN = 3;
-    private final Gruppenverwaltung gruppenverwaltung;
-    public final Nutzerverwaltung nutzerverwaltung;
-    public final Abzeichenverwaltung abzeichenverwaltung;
-    private final Levelverwaltung levelverwaltung;
-    private final Dialogverwaltung dialogverwaltung;
+    private static final int JACKPOT_MULTIPLIER = 10;
+    private static final boolean ANNOUNCE_STARTUP = true;
+    private static final boolean ANNOUNCE_REWARDS = true;
     private final Logger logger;
-    public final Storeverwaltung storeverwaltung;
-    public SilentSender silentPublic;
-    private Statistikverwaltung statistikverwaltung;
+    @SuppressWarnings({"FieldCanBeLocal", "unused"})
+    private final Map<Integer, Nutzer> mapNutzer;
+    private List<Long> listGroups;
+    private ArrayList<Long> uncheckedGroups;
+    private Random random;
+    private NutzerManager nutzermanager;
+    private Ausgabe ausgabe;
 
     public int creatorId() {
         return 67025299;
     }
 
     @SuppressWarnings("unused")
-    public Bot(String token, String name) {
-        super(token, name);
+    public Bot() {
+        super(System.getenv("gotteslachsbot_token"), System.getenv("gotteslachsbot_name"),
+                new MapDBContext(DBMaker.fileDB(System.getenv("gotteslachsbot_name")).fileMmapEnableIfSupported().transactionEnable().make()));
         logger = LogManager.getLogger(Bot.class);
         FileAppender fileAppender = new FileAppender();
         fileAppender.setName("FileLogger");
@@ -73,19 +70,36 @@ public class Bot extends AbilityBot {
         consoleAppender.setThreshold(Level.DEBUG);
         consoleAppender.activateOptions();
         logger.addAppender(consoleAppender);
-
-        silentPublic = silent;
-
-
-        dialogverwaltung = new Dialogverwaltung(this);
-        gruppenverwaltung = new Gruppenverwaltung(db);
-        abzeichenverwaltung = new Abzeichenverwaltung(db);
-        nutzerverwaltung = new Nutzerverwaltung(db, this);
-        levelverwaltung = new Levelverwaltung();
-        statistikverwaltung = new Statistikverwaltung(db);
-        storeverwaltung = new Storeverwaltung(db);
+        mapNutzer = db.getMap("NUTZER");
+        listGroups = db.getList("GROUPS");
+        random = new Random();
+        uncheckedGroups = new ArrayList<>();
+        nutzermanager = new NutzerManager(mapNutzer, users());
+        ausgabe = new Ausgabe(creatorId(), listGroups, silent, new Locale("de", "DE"));
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            logger.info("ShutdownHook");
+            nutzermanager.saveNutzer();
+            db.commit();
+            try {
+                db.close();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }));
+        ScheduledExecutorService backupTask = Executors.newSingleThreadScheduledExecutor();
+        backupTask.scheduleAtFixedRate(db::commit, 10, 10, TimeUnit.MINUTES);
     }
 
+    @PostConstruct
+    private void register() {
+        try {
+            new TelegramBotsApi().registerBot(this);
+        } catch (TelegramApiRequestException e) {
+            e.printStackTrace();
+        }
+        if (ANNOUNCE_STARTUP)
+            ausgabe.sendToAllGroups("status_gestartet", null);
+    }
 
     @SuppressWarnings("unused")
     public Ability cmdStats() {
@@ -95,76 +109,7 @@ public class Bot extends AbilityBot {
                 .locality(USER)
                 .input(0)
                 .action(ctx -> {
-                    Benutzer benutzer = nutzerverwaltung.getBenutzer(ctx.user().getId());
-                    if (benutzer == null) {
-                        logger.debug("Unbekannter Nutzer wollte Stats abfragen");
-                        silent.send("Du bist nicht im System.", ctx.chatId());
-                    } else {
-                        logger.debug(benutzer.getNutzername() + " hat seine Stats abgefragt.");
-                        String abzeichen = abzeichenverwaltung.convertToString(nutzerverwaltung.getBenutzer(ctx.user().getId()).getAbzeichen());
-                        silent.execute(new SendMessage(ctx.chatId(), "<b>Deine Stats:</b>\n" + toBenutzerStatsString(benutzer) + "\n<b>Deine Abzeichen:</b>\n" + abzeichen).setParseMode("HTML"));
-                    }
-                })
-                .build();
-    }
-
-    @SuppressWarnings("unused")
-    public Ability cmdStore() {
-        return Ability.builder()
-                .name("store")
-                .privacy(PUBLIC)
-                .locality(USER)
-                .input(0)
-                .action(ctx -> {
-                    logger.debug("Store geöffnet");
-                    dialogverwaltung.begin(new ShopDialog(), ctx.user().getId(), ctx.chatId());
-                })
-                .build();
-    }
-
-    @SuppressWarnings("unused")
-    public Ability cmdGraph() {
-        return Ability.builder()
-                .name("graph")
-                .privacy(PUBLIC)
-                .locality(ALL)
-                .input(0)
-                .action(ctx -> {
-                    if (ctx.arguments().length == 0) {
-                        silent.send("/graph <text/sticker/photo/video/voice/week/day/honorIn/honorOut>", ctx.chatId());
-                        return;
-                    }
-                    BufferedImage img;
-                    if (ctx.firstArg().equalsIgnoreCase("text")) {
-                        img = statistikverwaltung.generateTextPie();
-                    } else if (ctx.firstArg().equalsIgnoreCase("sticker")) {
-                        img = statistikverwaltung.generateStickerPie();
-                    } else if (ctx.firstArg().equalsIgnoreCase("photo")) {
-                        img = statistikverwaltung.generatePhotoPie();
-                    } else if (ctx.firstArg().equalsIgnoreCase("video")) {
-                        img = statistikverwaltung.generateVideoPie();
-                    } else if (ctx.firstArg().equalsIgnoreCase("voice")) {
-                        img = statistikverwaltung.generateVoicePie();
-                    } else if (ctx.firstArg().equalsIgnoreCase("week")) {
-                        img = statistikverwaltung.generateWeekBars();
-                    } else if (ctx.firstArg().equalsIgnoreCase("day")) {
-                        img = statistikverwaltung.generateTimeBars();
-                    } else if (ctx.firstArg().equalsIgnoreCase("honorIn")) {
-                        img = statistikverwaltung.generateLikeInPie();
-                    } else if (ctx.firstArg().equalsIgnoreCase("honorOut")) {
-                        img = statistikverwaltung.generateLikeOutPie();
-                    } else if (ctx.firstArg().equalsIgnoreCase("test")) {
-                        img = statistikverwaltung.generateTestDiagram();
-                    } else {
-                        return;
-                    }
-                    File out = new File("tg_temp.png");
-                    try {
-                        ImageIO.write(img, "png", out);
-                        sender.sendPhoto(new SendPhoto().setChatId(ctx.chatId()).setPhoto(out));
-                    } catch (IOException | TelegramApiException e) {
-                        e.printStackTrace();
-                    }
+                    //TODO
                 })
                 .build();
     }
@@ -173,131 +118,87 @@ public class Bot extends AbilityBot {
     public Ability cmdSettings() {
         return Ability.builder()
                 .name("settings")
+                .info("Einstellungen")
                 .privacy(PUBLIC)
                 .locality(USER)
                 .input(0)
                 .action(ctx -> {
                     logger.debug("Einstellungen geöffnet");
-                    dialogverwaltung.begin(new SettingsDialog(), ctx.user().getId(), ctx.chatId());
+                    //TODO
                 })
                 .build();
     }
 
     @SuppressWarnings("unused")
-    public Ability cmdGamble() {
+    public Ability cmdStop() {
         return Ability.builder()
-                .name("gamble")
-                .privacy(PUBLIC)
-                .locality(USER)
+                .name("stop")
+                .info("Hält den Bot an")
+                .privacy(ADMIN)
+                .locality(ALL)
                 .input(0)
                 .action(ctx -> {
-                    logger.debug("Gamble geöffnet");
-                    dialogverwaltung.begin(new CasinoDialog(), ctx.user().getId(), ctx.chatId());
+                    ausgabe.send(ctx.chatId(), nutzermanager.getNutzer(ctx.user().getId()).getLocale(), "status_shutdown", null);
+                    nutzermanager.saveNutzer();
+                    db.commit();
+                    System.exit(0);
                 })
                 .build();
     }
 
     @SuppressWarnings("unused")
-    public Ability cmdTop() {
+    public Ability cmdSave() {
         return Ability.builder()
-                .name("top")
+                .name("save")
+                .info("Speichert alle Änderungen")
+                .privacy(ADMIN)
+                .locality(ALL)
+                .input(0)
+                .action(ctx -> {
+                    Optional<Message> r = ausgabe.send(ctx.chatId(), nutzermanager.getNutzer(ctx.user().getId()).getLocale(), "status_save", null);
+                    nutzermanager.saveNutzer();
+                    db.commit();
+                    r.ifPresent(message -> ausgabe.edit(message.getChatId(), message.getMessageId(), nutzermanager.getNutzer(ctx.user().getId()).getLocale(), "status_saved", null));
+                })
+                .build();
+    }
+
+    @SuppressWarnings("unused")
+    public Ability cmdTopPoints() {
+        return Ability.builder()
+                .name("points")
+                .info("Zeigt die Top Punkte Nutzer an")
                 .privacy(PUBLIC)
                 .locality(ALL)
                 .input(0)
                 .action(ctx -> {
-                    logger.debug("Top abgefragt");
-                    List<Benutzer> topList = nutzerverwaltung.getTopBenuzerList(10);
+                    logger.debug("Top Points abgefragt");
+                    List<Nutzer> topList = nutzermanager.getNutzerListeTopPoints(10);
                     StringBuilder msg = new StringBuilder("Top-Liste:\n");
-                    topList.forEach(entry -> msg.append(toBenutzerStatsString(entry)).append("\n")
-                    );
-                    silent.execute(new SendMessage(ctx.chatId(), msg.toString()).setParseMode("HTML"));
+                    topList.forEach(entry -> msg.append(entry.getLinkedStringPointList()).append("\n"));
+                    ausgabe.sendRaw(ctx.chatId(), msg.toString());
                 })
                 .build();
     }
 
     @SuppressWarnings("unused")
-    public Ability cmdAusgabe() {
+    public Ability cmdTopRep() {
         return Ability.builder()
-                .name("ausgabe")
-                .privacy(ADMIN)
-                .locality(GROUP)
-                .input(0)
-                .action(ctx -> {
-                    logger.debug("Ausgabe Command");
-                    Gruppe gruppe = gruppenverwaltung.getGruppe(ctx.chatId());
-                    if (gruppe == null)
-                        silent.send("Diese Gruppe ist nicht Whitelisted!", ctx.chatId());
-                    else {
-                        boolean switched = !gruppe.getIsAusgabe();
-                        gruppenverwaltung.setGruppeIsAusgabe(gruppe, switched);
-                        silent.send("Ausgabe in der Gruppe " + (switched ? "aktiviert." : "deaktiviert."), ctx.chatId());
-                    }
-                })
-                .build();
-    }
-
-    @SuppressWarnings("unused")
-    public Ability cmdIP() {
-        return Ability.builder()
-                .name("ip")
-                .privacy(ADMIN)
+                .name("ehre")
+                .info("Zeigt die Top Ehren Nutzer an")
+                .privacy(PUBLIC)
                 .locality(ALL)
                 .input(0)
                 .action(ctx -> {
-                    logger.debug("IP Command");
-                    URL whatsmyip;
-                    try {
-                        whatsmyip = new URL("http://checkip.amazonaws.com");
-                    } catch (MalformedURLException e) {
-                        e.printStackTrace();
-                        return;
-                    }
-                    InputStream stream;
-                    try {
-                        stream = whatsmyip.openStream();
-                    } catch (IOException e) {
-                        e.printStackTrace();
-                        return;
-                    }
-                    BufferedReader in = new BufferedReader(new InputStreamReader(stream));
-                    try {
-                        String ip = in.readLine();
-                        silent.send("IP: " + ip, ctx.chatId());
-                    } catch (IOException e) {
-                        e.printStackTrace();
-                    }
-                    try {
-                        in.close();
-                    } catch (IOException ex) {
-                        ex.printStackTrace();
-                    }
+                    logger.debug("Top Rep abgefragt");
+                    List<Nutzer> topList = nutzermanager.getNutzerListeTopVotes(10);
+                    StringBuilder msg = new StringBuilder("Top-Liste:\n");
+                    topList.forEach(entry -> msg.append(entry.getLinkedStringVoteList()).append("\n"));
+                    ausgabe.sendRaw(ctx.chatId(), msg.toString());
                 })
                 .build();
     }
 
-    @SuppressWarnings("unused")
-    public Ability cmdWhitelist() {
-        return Ability.builder()
-                .name("whitelist")
-                .privacy(ADMIN)
-                .locality(GROUP)
-                .input(0)
-                .action(ctx -> {
-                    Gruppe gruppe = gruppenverwaltung.getGruppe(ctx.chatId());
-                    if (gruppe != null) {
-                        gruppenverwaltung.removeGruppe(gruppe);
-                        silent.send("Von der Whitelist entfernt.", ctx.chatId());
-                        logger.debug("Whitelist entfernt " + ctx.chatId());
-                    } else {
-                        gruppenverwaltung.createGruppe(new Gruppe(ctx.chatId(), false, 0));
-                        silent.send("Zur Whitelist hinzugefügt.", ctx.chatId());
-                        logger.debug("Whitelist hinzugefügt " + ctx.chatId());
-                    }
-                })
-                .build();
-    }
-
-    @SuppressWarnings("unused")
     public Ability cmdAdmin() {
         return Ability.builder()
                 .name("admin")
@@ -306,7 +207,6 @@ public class Bot extends AbilityBot {
                 .input(0)
                 .action(ctx -> {
                     logger.debug("Admin Menu geoeffnet");
-                    dialogverwaltung.begin(new AdminMainDialog(), ctx.user().getId(), ctx.chatId());
                 })
                 .build();
     }
@@ -316,7 +216,7 @@ public class Bot extends AbilityBot {
         return Reply.of(update -> {
             try {
                 if (update.getMessage().getReplyToMessage().getFrom().equals(this.getMe())) {
-                    dialogverwaltung.reply(update.getMessage());
+                    //TODO
                 }
             } catch (TelegramApiException e) {
                 e.printStackTrace();
@@ -325,204 +225,102 @@ public class Bot extends AbilityBot {
     }
 
 
-    @SuppressWarnings({"unused", "Duplicates"})
+    @SuppressWarnings("unused")
     public Reply onCallback() {
         return Reply.of(update -> {
-            dialogverwaltung.onCallback(update.getCallbackQuery());
+            String data = update.getCallbackQuery().getData();
+            if (data.startsWith("adm+")) {
+                if (!update.getCallbackQuery().getFrom().getId().equals(creatorId())) return;
+                long chatId = Long.parseLong(data.substring(4));
+                if (!uncheckedGroups.contains(chatId)) return;
+                uncheckedGroups.remove(chatId);
+                listGroups.add(chatId);
+                ausgabe.answerCallback(update.getCallbackQuery().getId());
+                ausgabe.removeMessage(update.getCallbackQuery().getMessage().getChatId(), update.getCallbackQuery().getMessage().getMessageId());
+                ausgabe.sendToGroup(chatId, "group_accepted", null);
+            } else if (data.startsWith("adm-")) {
+                if (!update.getCallbackQuery().getFrom().getId().equals(creatorId())) return;
+                long chatId = Long.parseLong(data.substring(4));
+                if (!uncheckedGroups.contains(chatId)) return;
+                uncheckedGroups.remove(chatId);
+                ausgabe.sendToGroup(chatId, "group_declined", null);
+                try {
+                    sender.execute(new LeaveChat().setChatId(chatId));
+                } catch (TelegramApiException e) {
+                    e.printStackTrace();
+                }
+            }
         }, Flag.CALLBACK_QUERY);
     }
 
     @SuppressWarnings("unused")
     public Reply onGroupMessage() {
         return Reply.of(update -> {
-            Gruppe gruppe = gruppenverwaltung.getGruppe(update.getMessage().getChatId());
-            if (gruppe == null) {
-                silent.send("@TimMorgner /whitelist", update.getMessage().getChatId());
-                logger.debug("Nicht Whitelisted " + update.getMessage().getChatId());
+            Message message = update.getMessage();
+            Nutzer nutzer = nutzermanager.getNutzer(message.getFrom().getId());
+
+            //Prüft ob die Gruppe bestätigt ist
+            if (!listGroups.contains(message.getChatId())) {
+                if (uncheckedGroups.contains(message.getChatId())) return;
+                uncheckedGroups.add(message.getChatId());
+                ausgabe.sendOwnerGroupCheck(message.getChatId(), message.getChat().getTitle());
+                ausgabe.sendToGroup(message.getChatId(), "group_requested", null);
                 return;
             }
 
-            Statistik stat = statistikverwaltung.getStatistik(update.getMessage().getFrom().getId());
-            if (update.getMessage().hasText()) {
-                stat = statistikverwaltung.logText(stat);
-            } else if (update.getMessage().hasSticker()) {
-                stat = statistikverwaltung.logSticker(stat);
-            } else if (update.getMessage().hasPhoto()) {
-                stat = statistikverwaltung.logPhoto(stat);
-            } else if (update.getMessage().hasVideo() || update.getMessage().hasVideoNote()) {
-                stat = statistikverwaltung.logVideo(stat);
-            } else if (update.getMessage().hasVoice()) {
-                stat = statistikverwaltung.logVoice(stat);
-            }
-            Calendar cal = Calendar.getInstance();
-            cal.setTime(new Date());
-            switch (cal.get(Calendar.DAY_OF_WEEK)) {
-                case Calendar.MONDAY:
-                    stat = statistikverwaltung.logMonday(stat);
-                    break;
-                case Calendar.TUESDAY:
-                    stat = statistikverwaltung.logTuesday(stat);
-                    break;
-                case Calendar.WEDNESDAY:
-                    stat = statistikverwaltung.logWednesday(stat);
-                    break;
-                case Calendar.THURSDAY:
-                    stat = statistikverwaltung.logThursday(stat);
-                    break;
-                case Calendar.FRIDAY:
-                    stat = statistikverwaltung.logFriday(stat);
-                    break;
-                case Calendar.SATURDAY:
-                    stat = statistikverwaltung.logSaturday(stat);
-                    break;
-                case Calendar.SUNDAY:
-                    stat = statistikverwaltung.logSunday(stat);
-                    break;
-                default:
-                    break;
-            }
-            int hour = cal.get(Calendar.HOUR_OF_DAY);
-            if (hour < 5 || hour >= 21) {
-                stat = statistikverwaltung.logNight(stat);
-            } else if (hour < 10) {
-                stat = statistikverwaltung.logMorning(stat);
-            } else if (hour < 15) {
-                stat = statistikverwaltung.logDay(stat);
-            } else {
-                stat = statistikverwaltung.logEvening(stat);
-            }
-            Benutzer benutzer = nutzerverwaltung.getBenutzer(update.getMessage().getFrom().getId());
-            if (benutzer == null) {
-                int[] abzeichen = new int[0];
-                logger.debug("Created " + update.getMessage().getFrom().getId());
-                benutzer = new Benutzer(update.getMessage().getFrom().getId(), START_PUNKTE, abzeichen, System.currentTimeMillis(), System.currentTimeMillis(), System.currentTimeMillis(), getFullName(update.getMessage().getFrom().getId()));
-                nutzerverwaltung.createBenutzer(benutzer);
-            }
-            checkReward(benutzer);
-            //checkLike
-            if (update.getMessage().hasText() && update.getMessage().isReply()) {
-                //Starts or ends with Emoji/+
-                if (update.getMessage().getText().matches("^(\\u002b|\\u261d|\\ud83d\\udc46|\\ud83d\\udc4f|\\ud83d\\ude18|\\ud83d\\ude0d|\\ud83d\\udc4c|\\ud83d\\udc4d)+[\\s\\S]*") || update.getMessage().getText().matches("[\\s\\S]*(\\u002b|\\u261d|\\ud83d\\udc46|\\ud83d\\udc4f|\\ud83d\\ude18|\\ud83d\\ude0d|\\ud83d\\udc4c|\\ud83d\\udc4d)+$")) {
-                    Benutzer replyTo = nutzerverwaltung.getBenutzer(update.getMessage().getReplyToMessage().getFrom().getId());
-                    if (benutzer.getNextLike() <= System.currentTimeMillis()) {
-                        if (replyTo != null && !replyTo.equals(benutzer)) {
-                            if (benutzer.getPunkte() >= HONOR_POINTS) {
-                                benutzer = nutzerverwaltung.setBenutzerNextLike(benutzer, TimeUnit.MINUTES.toMillis(LIKE_COOLDOWN));
-                                benutzer = nutzerverwaltung.setBenutzerPunkte(benutzer, benutzer.getPunkte() - HONOR_POINTS);
-                                replyTo = nutzerverwaltung.addBenutzerPunkte(replyTo, HONOR_POINTS);
-                                statistikverwaltung.logLikeOut(statistikverwaltung.getStatistik(benutzer.getUserId()));
-                                statistikverwaltung.logLikeIn(statistikverwaltung.getStatistik(replyTo.getUserId()));
-                                ausgabeHTML("<a href=\"tg://user?id=" + benutzer.getUserId() + "\">" + benutzer.getNutzername() + "</a> (<code>" + benutzer.getPunkte() + "</code>) hat <a href=\"tg://user?id=" + replyTo.getUserId() + "\">" + replyTo.getNutzername() + "</a> (<code>" + replyTo.getPunkte() + "</code>) mit " + HONOR_POINTS + " Punkten geehrt.");
-                            } else {
-                                logger.debug("Zu wenige Punkte zum Liken");
-                            }
+            if (message.isReply()) {
+                Message replyTo = message.getReplyToMessage();
+                if (!replyTo.getFrom().getBot()) {
+                    Nutzer ziel = nutzermanager.getNutzer(replyTo.getFrom().getId());
+                    if (!ziel.equals(nutzer)) {
+                        //Prüft ob die Nachricht ein Upvote enthält
+                        if (!nutzer.hasCooldownUpvote() && startsOrEndsWith(message.getText(), "\\u002b|\\u261d|\\ud83d\\udc46|\\ud83d\\udc4f|\\ud83d\\ude18|\\ud83d\\ude0d|\\ud83d\\udc4c|\\ud83d\\udc4d|\\ud83d\\ude38")) {
+                            ziel.addVote(1);
+                            nutzer.setCooldownUpvote(5, ChronoUnit.MINUTES);
+                            ausgabe.sendTempClear(message.getChatId(), nutzer.getLocale(), "vote_up", new Object[]{1, ziel.getLinkedStringVotes(), nutzer.getLinkedStringVotes()});
+                        }
+
+                        //Prüft ob die Nachricht ein Super-Upvote enthält
+                        if (!nutzer.hasCooldownSuperUpvote() && startsOrEndsWith(message.getText(), "\\u2764\\ufe0f|\\ud83d\\udc96|\\ud83e\\udde1|\\ud83d\\udc9b|\\ud83d\\udc9a|\\ud83d\\udc99|\\ud83d\\udc9c|\\ud83d\\udda4")) {
+                            int points = 2 + random.nextInt(SUPER_HONOR_MAX - 1);
+                            ziel.addVote(points);
+                            nutzer.setCooldownSuperUpvote(5, ChronoUnit.HOURS);
+                            ausgabe.sendTempClear(message.getChatId(), nutzer.getLocale(), "vote_super", new Object[]{points, ziel.getLinkedStringVotes(), nutzer.getLinkedStringVotes()});
+                        }
+
+                        //Prüft ob die Nachricht ein Downvote enthält
+                        if (!nutzer.hasCooldownDownvote() && startsOrEndsWith(message.getText(), "\\u2639\\ufe0f|\\ud83d\\ude20|\\ud83d\\ude21|\\ud83e\\udd2c|\\ud83e\\udd2e|\\ud83d\\udca9|\\ud83d\\ude3e|\\ud83d\\udc4e|\\ud83d\\udc47")) {
+                            ziel.removeVote(1);
+                            nutzer.setCooldownDownvote(10, ChronoUnit.MINUTES);
+                            ausgabe.sendTempClear(message.getChatId(), nutzer.getLocale(), "vote_down", new Object[]{1, ziel.getLinkedStringVotes(), nutzer.getLinkedStringVotes()});
                         }
                     }
                 }
             }
+            //Prüft ob der Nutzer Punkte für die Nachticht erhält
+            if (!nutzer.hasCooldownReward()) {
+                Random r = new Random();
+                int reward = (r.nextInt(NACHRICHT_PUNKTE_MAX) + NACHRICHT_PUNKTE_MIN);
+                if (random.nextInt(JACKPOT_CHANCE) == 0) {
+                    reward = reward * JACKPOT_MULTIPLIER;
+                    ausgabe.sendToAllGroups("reward_jackpot", new Object[]{reward, nutzer.getLinkedString()});
+                } else {
+                    nutzer.addPoints(r.nextInt(NACHRICHT_PUNKTE_MAX) + NACHRICHT_PUNKTE_MIN);
+                    if (ANNOUNCE_REWARDS)
+                        ausgabe.sendTempClear(message.getChatId(), nutzer.getLocale(), "reward", new Object[]{reward, nutzer.getLinkedString()});
+                }
+                nutzer.addPoints(reward);
+                nutzer.setCooldownReward(r.nextInt(NACHRICHT_COOLDOWN_MAX) + NACHRICHT_COOLDOWN_MIN, ChronoUnit.MINUTES);
+            }
+
         }, Flag.MESSAGE, update -> {
             Message m = update.getMessage();
             return (m.isSuperGroupMessage() || m.isGroupMessage()) && !m.isCommand() && (m.hasSticker() || m.hasAnimation() || m.hasAudio() || m.hasContact() || m.hasDocument() || m.hasLocation() || m.hasPhoto() || m.hasPoll() || m.hasText() || m.hasVideo() || m.hasVoice() || m.hasVideoNote()) && m.getPinnedMessage() == null && m.getDeleteChatPhoto() == null && m.getLeftChatMember() == null && m.getNewChatTitle() == null && m.getNewChatPhoto() == null;
         });
     }
 
-
-    private void checkReward(Benutzer nutzer) {
-        Benutzer benutzer = nutzer;
-        long timeLeft = TimeUnit.MILLISECONDS.toSeconds(benutzer.getNextBelohnung() - System.currentTimeMillis());
-        if (timeLeft <= 0) {
-            int punkte = new Random(System.currentTimeMillis()).nextInt(NACHRICHT_PUNKTE_MAX + 1 - NACHRICHT_PUNKTE_MIN) + NACHRICHT_PUNKTE_MIN;
-            punkte = checkJackpot(benutzer, punkte);
-            logger.debug("Reward " + benutzer.getUserId() + " - " + punkte);
-            statistikverwaltung.logRewards(statistikverwaltung.getStatistik(nutzer.getUserId()));
-            benutzer = nutzerverwaltung.addBenutzerPunkte(benutzer, punkte);
-            nutzerverwaltung.setBenutzerNextBelohnung(benutzer, System.currentTimeMillis() + TimeUnit.MINUTES.toMillis(new Random(System.currentTimeMillis()).nextInt(NACHRICHT_COOLDOWN_MAX + 1 - NACHRICHT_COOLDOWN_MIN) + NACHRICHT_COOLDOWN_MIN));
-        } else {
-            logger.debug("Zeit uebrig: " + timeLeft + " Sekunden");
-        }
-    }
-
-    public void checkLevelUp(Benutzer benutzer, int altPkt, int neuPkt) {
-        int alt = levelverwaltung.getLevel(altPkt);
-        int neu = levelverwaltung.getLevel(neuPkt);
-        if (alt < neu) {
-            logger.debug("Level gestiegen: " + benutzer.getUserId() + " ( " + alt + " | " + neu + " )");
-            if (neu - alt == 1) {
-                ausgabeBild("smug.moe/smg/" + neu + ".png", benutzer.getNutzername() + " ist jetzt ein " + levelverwaltung.getTitleForLevel(neu) + "!");
-            } else
-                ausgabeBild("smug.moe/smg/" + neu + ".png", benutzer.getNutzername() + " ist jetzt ein " + levelverwaltung.getTitleForLevel(neu) + " und hat dabei " + (neu - alt - 1) + " Level übersprungen!");
-        }
-    }
-
-    private void ausgabeBild(String bildUrl, String caption) {
-        Set<Gruppe> ausgabegruppen = gruppenverwaltung.getAusgabegruppen();
-        for (Gruppe g : ausgabegruppen) {
-            try {
-                if (g.getLastMessage() != 0)
-                    silent.execute(new DeleteMessage(g.getChatId(), g.getLastMessage()));
-                Message msg = sender.sendPhoto(new SendPhoto().setChatId(g.getChatId()).setPhoto(bildUrl).setCaption(caption));
-                gruppenverwaltung.setGruppeLastMessage(g, msg.getMessageId());
-            } catch (TelegramApiException e) {
-                System.err.println(e);
-            }
-        }
-    }
-
-    public void ausgabe(String s) {
-        Set<Gruppe> ausgabegruppen = gruppenverwaltung.getAusgabegruppen();
-        for (Gruppe g : ausgabegruppen) {
-            if (g.getLastMessage() != 0)
-                silent.execute(new DeleteMessage(g.getChatId(), g.getLastMessage()));
-            Optional<Message> msg = silent.send(s, g.getChatId());
-            if (msg.isPresent())
-                gruppenverwaltung.setGruppeLastMessage(g, msg.get().getMessageId());
-        }
-    }
-
-    private void ausgabeHTML(String s) {
-        Set<Gruppe> ausgabegruppen = gruppenverwaltung.getAusgabegruppen();
-        for (Gruppe g : ausgabegruppen) {
-            if (g.getLastMessage() != 0)
-                silent.execute(new DeleteMessage(g.getChatId(), g.getLastMessage()));
-            Optional<Message> msg = silent.execute(new SendMessage(g.getChatId(), s).setParseMode("HTML"));
-            msg.ifPresent(message -> gruppenverwaltung.setGruppeLastMessage(g, message.getMessageId()));
-        }
-    }
-
-    public void abzeichenVerliehen(Abzeichen abzeichen, ArrayList<Benutzer> selected) {
-        String user = "";
-        for (Benutzer benutzer : selected) {
-            user = user + ", " + benutzer.getNutzername();
-        }
-        user = user.substring(2);
-        ausgabe("Abzeichenverleihung - " + abzeichen.getName() + "\n" + abzeichen.getBeschreibung() + "\n\n" + abzeichen.getBelohnung() + " Punkte an die Ehrenmänner:\n" + user);
-    }
-
-    private int checkJackpot(Benutzer benutzer, int punkte) {
-        if (new Random(System.currentTimeMillis()).nextInt(JACKPOT) == 0) {
-            punkte = punkte * JACKPOT_MULTIPLYER;
-            ausgabeBild("smug.moe/smg/" + (new Random().nextInt(58) + 1) + ".png", benutzer.getNutzername() + " hat den JACKPOT gezogen und " + punkte + " Punkte bekommen!");
-        }
-        return punkte;
-    }
-
-    private String toBenutzerStatsString(Benutzer benutzer) {
-        return "<code>" + levelverwaltung.getLevel(benutzer.getPunkte()) + "</code> <b>" + levelverwaltung.getTitleForLevel(levelverwaltung.getLevel(benutzer.getPunkte())) + "</b> <a href=\"tg://user?id=" + benutzer.getUserId() + "\">" + benutzer.getNutzername() + "</a> (" + benutzer.getPunkte() + "/" + levelverwaltung.getGoal(levelverwaltung.getLevel(benutzer.getPunkte())) + ")";
-    }
-
-    private String getFullName(Integer id) {
-        User user = (User) db.getMap("USERS").get(id);
-        if (user == null) return "Unbekannt";
-        return AbilityUtils.fullName(user);
-    }
-
-    private int stringToInt(String string) {
-        int i = 0;
-        try {
-            i = Integer.parseInt(string);
-        } catch (NumberFormatException ignored) {
-        }
-        return i;
+    private boolean startsOrEndsWith(String text, String regex) {
+        return (text.matches("^(" + regex + ")+[\\s\\S]*") || text.matches("[\\s\\S]*(" + regex + ")+$"));
     }
 
     /**
@@ -534,6 +332,4 @@ public class Bot extends AbilityBot {
     public boolean checkGlobalFlags(Update update) {
         return true;
     }
-
-
 }
