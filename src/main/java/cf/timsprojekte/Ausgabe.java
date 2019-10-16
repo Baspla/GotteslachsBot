@@ -5,14 +5,15 @@ import org.telegram.abilitybots.api.sender.SilentSender;
 import org.telegram.telegrambots.meta.api.methods.AnswerCallbackQuery;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.methods.send.SendPhoto;
-import org.telegram.telegrambots.meta.api.methods.updatingmessages.DeleteMessage;
-import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageText;
+import org.telegram.telegrambots.meta.api.methods.updatingmessages.*;
 import org.telegram.telegrambots.meta.api.objects.Message;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
+import org.telegram.telegrambots.meta.api.objects.replykeyboard.ReplyKeyboard;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 
 import java.text.MessageFormat;
 import java.util.*;
+import java.util.stream.Collectors;
 
 public class Ausgabe {
 
@@ -37,9 +38,8 @@ public class Ausgabe {
     }
 
     public void sendToAllGroups(String key, Locale locale, Object... arguments) {
-        if (silent != null)
-            listGroups.forEach(group ->
-                    send(group, locale, key, arguments));
+        listGroups.forEach(group ->
+                send(group, locale, key, arguments));
     }
 
     public void sendToAllGroups(String key, Object... arguments) {
@@ -60,16 +60,14 @@ public class Ausgabe {
 
 
     public Optional<Message> sendTemp(Long id, Locale locale, String key, Object... arguments) {
-        if (silent == null) return Optional.empty();
         Optional<Message> message = silent.execute(new SendMessage().setChatId(id)
-                .setText(format(locale,key,arguments))
+                .setText(format(locale, key, arguments))
                 .setParseMode("HTML"));
         message.ifPresent(value -> toBeRemoved.add(value));
         return message;
     }
 
     public void sendTempClear(Long id, Locale locale, String key, Object... arguments) {
-        if (silent == null) return;
         clear();
         sendTemp(id, locale, key, arguments);
     }
@@ -82,9 +80,9 @@ public class Ausgabe {
     public static String format(Locale locale, String key, Object... arguments) {
         try {
             return new MessageFormat(ResourceBundle.getBundle("messages/Nachrichten", locale).getString(key), locale).format(arguments);
-        }catch (MissingResourceException e){
-            e.printStackTrace();
-            return "STRING NOT FOUND ["+key+"] FOR ["+locale.toString()+"]";
+        } catch (MissingResourceException e) {
+            System.err.println("MISSING [" + key + "][" + locale.toString() + "][" + Arrays.stream(arguments).map(Object::toString).collect(Collectors.joining(",")) + "]");
+            return "[" + key + "][" + locale.toString() + "][" + Arrays.stream(arguments).map(Object::toString).collect(Collectors.joining(",")) + "]";
         }
     }
 
@@ -114,5 +112,23 @@ public class Ausgabe {
         } catch (TelegramApiException e) {
             e.printStackTrace();
         }
+    }
+
+    public void sendImageToAll(Locale locale, String key, String url, Object... arguments) {
+        listGroups.forEach(group ->
+                sendImage(group, locale, key, url, arguments));
+    }
+
+    public Optional<Message> sendKeyboard(Long chatId, ReplyKeyboard keyboard, Locale locale, String key, Object... arguments) {
+        return silent.execute(new SendMessage().setChatId(chatId).setText(format(locale, key, arguments)).setParseMode("HTML").setReplyMarkup(keyboard));
+
+    }
+
+    public void editKeyboard(Long chatId, Integer messageId, InlineKeyboardMarkup keyboard, Locale locale, String key, Object... arguments) {
+        silent.execute(new EditMessageText().setText(format(locale, key, arguments)).setChatId(chatId).setMessageId(messageId).setReplyMarkup(keyboard));
+    }
+
+    public void removeKeyboard(Long chatId, Integer messageId) {
+        silent.execute(new EditMessageReplyMarkup().setMessageId(messageId).setChatId(chatId).setReplyMarkup(null));
     }
 }

@@ -1,7 +1,6 @@
 package cf.timsprojekte;
 
-import java.util.Locale;
-import java.util.ResourceBundle;
+import java.util.*;
 
 public class LevelManager {
 
@@ -9,14 +8,16 @@ public class LevelManager {
             100, 350, 800, 1000, 1400,
             1900, 2200, 2500, 3000, 3500,
             4000, 4500, 5000, 5500, 6000,
-            6500, 7000, 8000, 10000, 15000};
+            6500, 7000, 8000, 10000, 15000,20000};
 
     public static String getTitelForLevel(int level, Locale locale) {
         ResourceBundle bundle = ResourceBundle.getBundle("messages/Nachrichten", locale);
-        if(bundle.containsKey("level.name."+level)){
-            return bundle.getString("level.name."+level);
+        try {
+            return bundle.getString("level.name." + level);
+        } catch (MissingResourceException e) {
+            e.printStackTrace();
+            return "Noch keine Übersetztung";
         }
-        return "Noch keine Übersetztung";
     }
 
     public static int getLevel(int punkte) {

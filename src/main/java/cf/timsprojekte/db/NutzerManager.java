@@ -1,49 +1,37 @@
 package cf.timsprojekte.db;
 
-import cf.timsprojekte.db.Nutzer;
+import cf.timsprojekte.Language;
 import org.telegram.abilitybots.api.util.AbilityUtils;
 import org.telegram.telegrambots.meta.api.objects.User;
 
 import java.util.*;
-import java.util.concurrent.*;
 import java.util.stream.Collectors;
 
 public class NutzerManager {
     private final Map<Integer, Nutzer> map;
     private final Map<Integer, Nutzer> db;
-    private Map<Integer, User> users;
 
 
-    public NutzerManager(Map<Integer, Nutzer> db, Map<Integer, User> users) {
+    public NutzerManager(Map<Integer, Nutzer> db) {
         this.db = db;
         this.map = new HashMap<>(db);
-        this.users = users;
     }
 
-    public void saveNutzer(){
+    public void saveNutzer() {
         db.putAll(map);
     }
 
-    public Nutzer getNutzer(Integer id) {
-        Nutzer nutzer = map.get(id);
-        if (nutzer == null)
-            nutzer = createNutzer(id, getFullName(id));
-        nutzer.setManager(this);
+    public Nutzer getNutzer(User user) {
+        Nutzer nutzer = map.get(user.getId());
+        if (nutzer == null && !user.getBot())
+            nutzer = createNutzer(user.getId(), AbilityUtils.fullName(user));
         return nutzer;
     }
 
-    private String getFullName(Integer id) {
-        User user = users.get(id);
-        if (user == null) return "Unbekannt";
-        return AbilityUtils.fullName(user);
-    }
-
-    public Nutzer createNutzer(Integer userId) {
-        return createNutzer(userId, "Unbekannt");
-    }
-
-    public Nutzer createNutzer(Integer userId, String username) {
-        Nutzer nutzer = new Nutzer(userId, username, 0, 0);
+    private Nutzer createNutzer(Integer userId, String username) {
+        HashSet<Language> langs = new HashSet<Language>();
+        langs.add(Language.Deutsch);
+        Nutzer nutzer = new Nutzer(userId, username, 0, 0, langs);
         map.put(userId, nutzer);
         return nutzer;
     }
