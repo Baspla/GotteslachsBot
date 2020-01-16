@@ -21,6 +21,10 @@ public class NutzerManager {
         db.putAll(map);
     }
 
+    public void loadNutzer() {
+        map.putAll(db);
+    }
+
     public Nutzer getNutzer(User user) {
         Nutzer nutzer = map.get(user.getId());
         if (nutzer == null && !user.getBot())
@@ -28,8 +32,12 @@ public class NutzerManager {
         return nutzer;
     }
 
+    public Nutzer getNutzer(int userId) {
+        return map.get(userId);
+    }
+
     private Nutzer createNutzer(Integer userId, String username) {
-        HashSet<Language> langs = new HashSet<Language>();
+        HashSet<Language> langs = new HashSet<>();
         langs.add(Language.Deutsch);
         Nutzer nutzer = new Nutzer(userId, username, 0, 0, langs);
         map.put(userId, nutzer);

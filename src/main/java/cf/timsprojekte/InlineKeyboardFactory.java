@@ -3,8 +3,7 @@ package cf.timsprojekte;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.*;
 
 public class InlineKeyboardFactory {
     private ArrayList<List<InlineKeyboardButton>> rows;
@@ -13,7 +12,7 @@ public class InlineKeyboardFactory {
         rows = new ArrayList<>();
     }
 
-    public static InlineKeyboardFactory build() {
+    static InlineKeyboardFactory build() {
         return new InlineKeyboardFactory();
     }
 
@@ -21,24 +20,25 @@ public class InlineKeyboardFactory {
         return new InlineKeyboardButton(text).setCallbackData(data);
     }
 
-    public InlineKeyboardFactory addRow(InlineKeyboardButton... buttons) {
+    InlineKeyboardFactory addRow(InlineKeyboardButton... buttons) {
         ArrayList<InlineKeyboardButton> buttonList = new ArrayList<>();
-        for (int i = 0; i < buttons.length; i++) {
-            buttonList.add(buttons[i]);
-        }
+        Collections.addAll(buttonList, buttons);
         rows.add(buttonList);
         return this;
     }
 
-    public InlineKeyboardMarkup toMarkup() {
-        InlineKeyboardMarkup keyboard = new InlineKeyboardMarkup().setKeyboard(rows);
-        return keyboard;
+    InlineKeyboardMarkup toMarkup() {
+        return new InlineKeyboardMarkup().setKeyboard(rows);
     }
 
-    public InlineKeyboardFactory addRow(ArrayList<InlineKeyboardButton> buttons) {
+    InlineKeyboardFactory addRow(ArrayList<InlineKeyboardButton> buttons) {
         if (buttons == null) return this;
         if (buttons.size() <= 0) return this;
         rows.add(buttons);
         return this;
+    }
+
+    boolean hasRows() {
+        return !rows.isEmpty();
     }
 }

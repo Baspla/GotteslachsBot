@@ -2,32 +2,23 @@ package cf.timsprojekte.db;
 
 import cf.timsprojekte.*;
 import com.fasterxml.jackson.annotation.JsonIgnore;
-import com.fasterxml.jackson.annotation.JsonProperty;
-import org.apache.commons.codec.language.bm.Lang;
 
 import java.io.Serializable;
 import java.time.Instant;
 import java.time.temporal.TemporalUnit;
 import java.util.*;
-import java.util.stream.Collectors;
 
 public class Nutzer implements Serializable {
 
     public static final long serialVersionUID = 187111222333L;
-    @JsonProperty
     private Integer votes;
-    @JsonProperty
     private String username;
-    @JsonProperty
     private Integer userId;
-    @JsonProperty
     private Integer points;
-    @JsonProperty
-    private String lang_language;
-    @JsonProperty
-    private String lang_country;
-    @JsonProperty
-    private String lang_variant;
+    private String langLanguage;
+    private String langCountry;
+    private String langVariant;
+    private Set<Language> languages;
 
     @JsonIgnore
     private Instant cooldownSuperUpvote = Instant.now();
@@ -38,9 +29,15 @@ public class Nutzer implements Serializable {
     @JsonIgnore
     private Instant cooldownReward = Instant.now();
     @JsonIgnore
+    private Instant cooldownPlace = Instant.now();
+    @JsonIgnore
     private State state;
-    private Set<Language> languages;
+    @JsonIgnore
+    private HashMap<String, String> vars = new HashMap<>();
 
+    public Nutzer() {
+        super();
+    }
 
     public Nutzer(Integer userId, String username, int points, int votes, Set<Language> languages) {
         this.userId = userId;
@@ -186,6 +183,11 @@ public class Nutzer implements Serializable {
     }
 
     @JsonIgnore
+    public void setCooldownPlace(int time, TemporalUnit unit) {
+        cooldownPlace = Instant.now().plus(time, unit);
+    }
+
+    @JsonIgnore
     private Instant nowIfNull(Instant instant) {
         return (instant == null) ? Instant.now() : instant;
     }
@@ -211,6 +213,11 @@ public class Nutzer implements Serializable {
     }
 
     @JsonIgnore
+    private Instant getCooldownPlace() {
+        return nowIfNull(cooldownPlace);
+    }
+
+    @JsonIgnore
     public boolean hasCooldownDownvote() {
         return getCooldownDownvote().isAfter(Instant.now());
     }
@@ -231,24 +238,53 @@ public class Nutzer implements Serializable {
     }
 
     @JsonIgnore
+    public boolean hasCooldownPlace() {
+        return getCooldownPlace().isAfter(Instant.now());
+    }
+
+    @JsonIgnore
     public Locale getLocale() {
-        if (lang_language != null && !lang_language.isEmpty())
-            if (lang_country != null && !lang_country.isEmpty())
-                if (lang_variant != null && !lang_variant.isEmpty())
-                    return new Locale(lang_language, lang_country, lang_variant);
+        if (langLanguage != null && !langLanguage.isEmpty())
+            if (langCountry != null && !langCountry.isEmpty())
+                if (langVariant != null && !langVariant.isEmpty())
+                    return new Locale(langLanguage, langCountry, langVariant);
                 else
-                    return new Locale(lang_language, lang_country);
+                    return new Locale(langLanguage, langCountry);
             else
-                return new Locale(lang_language);
+                return new Locale(langLanguage);
         else
             return Locale.getDefault();
     }
 
     @JsonIgnore
     public void setLocale(String language, String country, String variant) {
-        lang_language = language;
-        lang_country = country;
-        lang_variant = variant;
+        setLangLanguage(language);
+        setLangCountry(country);
+        setLangVariant(variant);
+    }
+
+    public String getLangLanguage() {
+        return langLanguage;
+    }
+
+    private void setLangLanguage(String langLanguage) {
+        this.langLanguage = langLanguage;
+    }
+
+    public String getLangCountry() {
+        return langCountry;
+    }
+
+    private void setLangCountry(String langCountry) {
+        this.langCountry = langCountry;
+    }
+
+    public String getLangVariant() {
+        return langVariant;
+    }
+
+    private void setLangVariant(String langVariant) {
+        this.langVariant = langVariant;
     }
 
     @JsonIgnore
@@ -267,4 +303,13 @@ public class Nutzer implements Serializable {
         return state;
     }
 
+    @JsonIgnore
+    public void setVar(String key, String value) {
+        vars.put(key, value);
+    }
+
+    @JsonIgnore
+    public String getVar(String key) {
+        return vars.get(key);
+    }
 }

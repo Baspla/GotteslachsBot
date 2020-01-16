@@ -1,16 +1,21 @@
 package cf.timsprojekte;
 
+import cf.timsprojekte.db.Event;
+import cf.timsprojekte.db.Nutzer;
 import org.telegram.abilitybots.api.sender.MessageSender;
 import org.telegram.abilitybots.api.sender.SilentSender;
 import org.telegram.telegrambots.meta.api.methods.AnswerCallbackQuery;
+import org.telegram.telegrambots.meta.api.methods.AnswerInlineQuery;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.methods.send.SendPhoto;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.*;
 import org.telegram.telegrambots.meta.api.objects.Message;
+import org.telegram.telegrambots.meta.api.objects.inlinequery.result.InlineQueryResult;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.ReplyKeyboard;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 
+import java.io.InputStream;
 import java.text.MessageFormat;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -24,7 +29,7 @@ public class Ausgabe {
     private Locale groupLocale;
     private MessageSender sender;
 
-    public Ausgabe(int creatorId, List<Long> listGroups, SilentSender silent, Locale groupLocale, MessageSender sender) {
+    Ausgabe(int creatorId, List<Long> listGroups, SilentSender silent, Locale groupLocale, MessageSender sender) {
         this.owner = creatorId;
         this.listGroups = listGroups;
         this.silent = silent;
@@ -33,33 +38,50 @@ public class Ausgabe {
         toBeRemoved = new ArrayList<>();
     }
 
-    public void answerCallback(String id) {
+    void answerCallback(String id) {
         silent.execute(new AnswerCallbackQuery().setCallbackQueryId(id));
     }
 
-    public void sendToAllGroups(String key, Locale locale, Object... arguments) {
+    private void sendToAllGroups(String key, Locale locale, Object... arguments) {
         listGroups.forEach(group ->
                 send(group, locale, key, arguments));
     }
 
-    public void sendToAllGroups(String key, Object... arguments) {
+    public void sendRawToAllGroups(String s) {
+        listGroups.forEach(group -> {
+            System.out.println(group);
+            sendRaw(group, s);
+        });
+    }
+
+    void sendToAllGroups(String key, Object... arguments) {
         sendToAllGroups(key, groupLocale, arguments);
     }
 
-    public Optional<Message> sendToGroup(Long chatId, String key, Object... arguments) {
+    Optional<Message> sendToGroup(Long chatId, String key, Object... arguments) {
         return send(chatId, groupLocale, key, arguments);
     }
 
-    public Optional<Message> send(Long chatId, Locale locale, String key, Object... arguments) {
+    Optional<Message> send(Long chatId, Locale locale, String key, Object... arguments) {
         return silent.execute(new SendMessage().setChatId(chatId).setText(format(locale, key, arguments)).setParseMode("HTML"));
     }
 
-    public void edit(Long chatId, Integer messageId, Locale locale, String key, Object... arguments) {
+    void edit(Long chatId, Integer messageId, Locale locale, String key, Object... arguments) {
         silent.execute(new EditMessageText().setText(format(locale, key, arguments)).setChatId(chatId).setMessageId(messageId));
     }
 
+    void editCaption(Long chatId, Integer messageId, String text, InlineKeyboardMarkup replyMarkup) {
+        silent.execute(new EditMessageCaption().setCaption(text).setChatId(chatId + "").setMessageId(messageId).setParseMode("HTML").setReplyMarkup(replyMarkup));
+    }
 
-    public Optional<Message> sendTemp(Long id, Locale locale, String key, Object... arguments) {
+    Optional<Message> sendTempRaw(Long chatId, String msg) {
+        clear();
+        Optional<Message> message = silent.execute(new SendMessage().setChatId(chatId).setText(msg).setParseMode("HTML"));
+        message.ifPresent(value -> toBeRemoved.add(value));
+        return message;
+    }
+
+    Optional<Message> sendTemp(Long id, Locale locale, String key, Object... arguments) {
         Optional<Message> message = silent.execute(new SendMessage().setChatId(id)
                 .setText(format(locale, key, arguments))
                 .setParseMode("HTML"));
@@ -67,7 +89,7 @@ public class Ausgabe {
         return message;
     }
 
-    public void sendTempClear(Long id, Locale locale, String key, Object... arguments) {
+    void sendTempClear(Long id, Locale locale, String key, Object... arguments) {
         clear();
         sendTemp(id, locale, key, arguments);
     }
@@ -86,10 +108,10 @@ public class Ausgabe {
         }
     }
 
-    public void sendOwnerGroupCheck(Long chatId, String title) {
+    void sendOwnerGroupCheck(Long chatId, String title) {
         InlineKeyboardMarkup keyboard = InlineKeyboardFactory.build()
-                .addRow(InlineKeyboardFactory.button("Hinzufügen", "adm+" + chatId))
-                .addRow(InlineKeyboardFactory.button("Blockieren", "adm-" + chatId))
+                .addRow(InlineKeyboardFactory.button("Hinzufügen", "admGroup_+_" + chatId))
+                .addRow(InlineKeyboardFactory.button("Blockieren", "admGroup_-_" + chatId))
                 .toMarkup();
         silent.execute(new SendMessage().setText("Die Gruppe \"" + title + "\" <i>(" + chatId + ")</i> benutzt den Bot")
                 .setChatId(owner)
@@ -97,16 +119,26 @@ public class Ausgabe {
                 .setReplyMarkup(keyboard));
     }
 
+    void sendOwnerEventCheck(Nutzer nutzer, Event event) {
+        InlineKeyboardMarkup keyboard = InlineKeyboardFactory.build()
+                .addRow(InlineKeyboardFactory.button("Hinzufügen", "admEvent_+_" + event.getId()))
+                .addRow(InlineKeyboardFactory.button("Blockieren", "admEvent_-_" + event.getId()))
+                .toMarkup();
+        silent.execute(new SendMessage().setText("Der Nutzer \"" + nutzer.getUsername() + "\" beantragt ein Event\n<b>" + event.getName() + "</b>\n" + event.getDesc() + "\n\nPunkte: " + event.getPoints())
+                .setChatId(owner)
+                .setParseMode("HTML")
+                .setReplyMarkup(keyboard));
+    }
 
-    public void removeMessage(Long chatId, Integer messageId) {
+    void removeMessage(Long chatId, Integer messageId) {
         silent.execute(new DeleteMessage().setChatId(chatId).setMessageId(messageId));
     }
 
-    public Optional<Message> sendRaw(Long chatId, String msg) {
+    Optional<Message> sendRaw(Long chatId, String msg) {
         return silent.execute(new SendMessage().setChatId(chatId).setText(msg).setParseMode("HTML"));
     }
 
-    public void sendImage(Long chatId, Locale locale, String key, String url, Object... arguments) {
+    private void sendImage(Long chatId, Locale locale, String key, String url, Object... arguments) {
         try {
             sender.sendPhoto(new SendPhoto().setChatId(chatId).setCaption(format(locale, key, arguments)).setParseMode("HTML").setPhoto(url));
         } catch (TelegramApiException e) {
@@ -114,21 +146,56 @@ public class Ausgabe {
         }
     }
 
-    public void sendImageToAll(Locale locale, String key, String url, Object... arguments) {
+    void sendImage(Long chatId, String name, InputStream photoStream) {
+        try {
+            sender.sendPhoto(new SendPhoto().setChatId(chatId).setPhoto(name, photoStream));
+        } catch (TelegramApiException e) {
+            e.printStackTrace();
+        }
+    }
+
+    void sendImage(Long chatId, String name, InputStream photoStream, String caption, InlineKeyboardMarkup keyboardMarkup) {
+        try {
+            sender.sendPhoto(new SendPhoto().setChatId(chatId).setPhoto(name, photoStream).setCaption(caption).setReplyMarkup(keyboardMarkup));
+        } catch (TelegramApiException e) {
+            e.printStackTrace();
+        }
+    }
+
+    public void sendTempImage(Long chatId, String name, InputStream photoStream) {
+        try {
+            clear();
+            Message message = sender.sendPhoto(new SendPhoto().setChatId(chatId).setPhoto(name, photoStream));
+            toBeRemoved.add(message);
+        } catch (TelegramApiException e) {
+            e.printStackTrace();
+        }
+    }
+
+
+    void sendImageToAll(Locale locale, String key, String url, Object... arguments) {
         listGroups.forEach(group ->
                 sendImage(group, locale, key, url, arguments));
     }
 
-    public Optional<Message> sendKeyboard(Long chatId, ReplyKeyboard keyboard, Locale locale, String key, Object... arguments) {
+    Optional<Message> sendKeyboard(Long chatId, ReplyKeyboard keyboard, Locale locale, String key, Object... arguments) {
         return silent.execute(new SendMessage().setChatId(chatId).setText(format(locale, key, arguments)).setParseMode("HTML").setReplyMarkup(keyboard));
 
     }
 
-    public void editKeyboard(Long chatId, Integer messageId, InlineKeyboardMarkup keyboard, Locale locale, String key, Object... arguments) {
+    void editKeyboard(Long chatId, Integer messageId, InlineKeyboardMarkup keyboard, Locale locale, String key, Object... arguments) {
         silent.execute(new EditMessageText().setText(format(locale, key, arguments)).setChatId(chatId).setMessageId(messageId).setReplyMarkup(keyboard));
     }
 
-    public void removeKeyboard(Long chatId, Integer messageId) {
+    void editKeyboard(Long chatId, Integer messageId, InlineKeyboardMarkup keyboard) {
+        silent.execute(new EditMessageReplyMarkup().setChatId(chatId).setMessageId(messageId).setReplyMarkup(keyboard));
+    }
+
+    void removeKeyboard(Long chatId, Integer messageId) {
         silent.execute(new EditMessageReplyMarkup().setMessageId(messageId).setChatId(chatId).setReplyMarkup(null));
+    }
+
+    public void answerInlineQuery(String id, String nextOffset, Boolean personal, List<InlineQueryResult> results) {
+        silent.execute(new AnswerInlineQuery().setPersonal(personal).setInlineQueryId(id).setNextOffset(nextOffset).setResults(results));
     }
 }

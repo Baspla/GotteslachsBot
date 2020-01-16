@@ -39,7 +39,7 @@ public enum ShopItem {
     private final int price;
 
     ShopItem(String title, String data, int price, Consumer<BuyData> onBuy) {
-        this.data = "shop_" + data;
+        this.data = data;
         this.title = "shopItem." + title;
         this.price = price;
         this.onBuy = onBuy;
@@ -66,7 +66,7 @@ public enum ShopItem {
         private final Ausgabe ausgabe;
         private final Long chatId;
 
-        public BuyData(Nutzer nutzer, Ausgabe ausgabe, Long chatId) {
+        BuyData(Nutzer nutzer, Ausgabe ausgabe, Long chatId) {
             this.nutzer = nutzer;
             this.ausgabe = ausgabe;
             this.chatId = chatId;
@@ -76,7 +76,7 @@ public enum ShopItem {
             return nutzer;
         }
 
-        public Ausgabe getAusgabe() {
+        Ausgabe getAusgabe() {
             return ausgabe;
         }
 

@@ -1,5 +1,5 @@
 package cf.timsprojekte;
 
 public enum State {
-    Shop, Language, Event, Default, Name
+   Default, Scan, EventName, EventDesc, EventPts, Name
 }
