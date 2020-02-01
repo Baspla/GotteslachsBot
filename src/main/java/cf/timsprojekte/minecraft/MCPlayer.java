@@ -1,4 +1,4 @@
-package cf.timsprojekte;
+package cf.timsprojekte.minecraft;
 
 import java.util.Objects;
 

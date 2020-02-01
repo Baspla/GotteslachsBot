@@ -1,7 +1,7 @@
 package cf.timsprojekte;
 
 import cf.timsprojekte.db.*;
-import cf.timsprojekte.db.Event;
+import cf.timsprojekte.minecraft.MinecraftManager;
 import kotlin.Pair;
 import org.apache.log4j.*;
 import org.mapdb.DBMaker;
@@ -52,8 +52,6 @@ public class Bot extends AbilityBot {
     private static final int NACHRICHT_COOLDOWN_MAX = 4;
     private static final int JACKPOT_MULTIPLIER = 10;
     private static final boolean ANNOUNCE_STARTUP = false;
-    private static final String EMOJI_YES = "Ja";
-    private static final String EMOJI_NO = "Nein";
 
     //
     // VARIABLES
@@ -63,16 +61,12 @@ public class Bot extends AbilityBot {
     private final Runnable saveRunnable;
     private final PlaceManager placemanager;
     private final CodeManager codemanager;
-    private final Runnable minecraftRunnable;
-    private final Logger mcLogger;
+    private final MinecraftManager mcmanager;
     private List<Long> listGroups;
     private ArrayList<Long> uncheckedGroups;
     private Random random;
     private NutzerManager nutzermanager;
-    private EventManager eventmanager;
     private Ausgabe ausgabe;
-    private RiddleManager riddlemanager;
-    private MCInfo info;
 
     //
     // SETUP
@@ -88,29 +82,19 @@ public class Bot extends AbilityBot {
                 new MapDBContext(DBMaker.fileDB(System.getenv("gotteslachsbot_name")).fileMmapEnableIfSupported().transactionEnable().make()));
 
         logger = LogManager.getLogger(Bot.class);
-        mcLogger = LogManager.getLogger("mc");
-        FileAppender mca = new FileAppender();
-        mca.setName("McLogger");
-        mca.setFile("mc.log");
-        String PTR = "[%d] %m%n";
-        mca.setLayout(new PatternLayout(PTR));
-        mca.setThreshold(Level.INFO);
-        mca.setAppend(true);
-        mca.activateOptions();
-        mcLogger.addAppender(mca);
 
         FileAppender fileAppender = new FileAppender();
         fileAppender.setName("FileLogger");
         fileAppender.setFile("gotteslachs.tglog");
         String PATTERN = "%d | %-5p | %c{1} | %m%n";
         fileAppender.setLayout(new PatternLayout(PATTERN));
-        fileAppender.setThreshold(Level.DEBUG);
+        fileAppender.setThreshold(Level.INFO);
         fileAppender.setAppend(true);
         fileAppender.activateOptions();
         logger.addAppender(fileAppender);
         ConsoleAppender consoleAppender = new ConsoleAppender();
         consoleAppender.setLayout(fileAppender.getLayout());
-        consoleAppender.setThreshold(Level.DEBUG);
+        consoleAppender.setThreshold(Level.ERROR);
         consoleAppender.activateOptions();
         logger.addAppender(consoleAppender);
 
@@ -119,39 +103,20 @@ public class Bot extends AbilityBot {
         uncheckedGroups = new ArrayList<>();
         Map<Integer, Nutzer> mapNutzer = db.getMap("NUTZER");
         nutzermanager = new NutzerManager(mapNutzer);
-        Map<Integer, Event> mapEvents = db.getMap("EVENTS");
-        eventmanager = new EventManager(mapEvents);
         placemanager = new PlaceManager();
-        Map<String, Riddle> mapRiddles = db.getMap("RIDDLES");
-        riddlemanager = new RiddleManager(mapRiddles);
         ausgabe = new Ausgabe(creatorId(), listGroups, silent, new Locale("de", "DE"), sender);
         Map<String, String> mapCodes = db.getMap("CODES");
         codemanager = new CodeManager(mapCodes);
 
+        mcmanager = new MinecraftManager();
+
         saveRunnable = () -> {
             nutzermanager.saveNutzer();
-            eventmanager.saveEvents();
             placemanager.savePlace();
             db.commit();
         };
 
-        minecraftRunnable = () -> {
-            MCInfo oldInfo = info;
-            info = MCInfo.request("89.163.187.158", 25565);
-            if (oldInfo != null) {
-                ArrayList<MCPlayer> leaves = checkLeaves(oldInfo.getSamples(), info.getSamples());
-                ArrayList<MCPlayer> joins = checkJoins(oldInfo.getSamples(), info.getSamples());
-                System.out.println("Refresh");
-                if (!leaves.isEmpty() || !joins.isEmpty()) {
-                    for (MCPlayer player : joins) {
-                        mcLogger.info(player.getName()+" ist beigetreten");
-                    }
-                    for (MCPlayer player : leaves) {
-                        mcLogger.info(player.getName()+" ist gegangen");
-                    }
-                }
-            }
-        };
+
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             logger.info("Shutdown Hook triggered");
@@ -162,24 +127,8 @@ public class Bot extends AbilityBot {
                 e.printStackTrace();
             }
         }));
-
-        ScheduledExecutorService minecraftTask = Executors.newSingleThreadScheduledExecutor();
-        minecraftRunnable.run();
-        minecraftTask.scheduleAtFixedRate(minecraftRunnable, 0, 30, TimeUnit.SECONDS);
         ScheduledExecutorService backupTask = Executors.newSingleThreadScheduledExecutor();
         backupTask.scheduleAtFixedRate(saveRunnable, 10, 10, TimeUnit.MINUTES);
-    }
-
-    private ArrayList<MCPlayer> checkJoins(ArrayList<MCPlayer> old, ArrayList<MCPlayer> now) {
-        ArrayList<MCPlayer> copy = new ArrayList<>(now);
-        copy.removeAll(old);
-        return copy;
-    }
-
-    private ArrayList<MCPlayer> checkLeaves(ArrayList<MCPlayer> old, ArrayList<MCPlayer> now) {
-        ArrayList<MCPlayer> copy = new ArrayList<>(old);
-        copy.removeAll(now);
-        return copy;
     }
 
     @PostConstruct
@@ -223,9 +172,9 @@ public class Bot extends AbilityBot {
                 .input(0)
                 .action(ctx -> {
                     String msg;
-                    if (info.isOnline())
-                        msg = "<b>Minecraft " + info.getVersion() + "</b>\n" + (info.getModded() ? "(modded)\n" : "") + "<i>" + info.getMotd() + "</i>\n(" + info.getCurrentPlayers() + "/" + info.getMaximumPlayers() + ") " + info.getLatency() + "ms\n" + info.getSamplesFormatted();
-                    else if (info.hasError()) {
+                    if (mcmanager.info.isOnline())
+                        msg = "<b>Minecraft " + mcmanager.info.getVersion() + "</b>\n" + (mcmanager.info.getModded() ? "(modded)\n" : "") + "<i>" + mcmanager.info.getMotd() + "</i>\n(" + mcmanager.info.getCurrentPlayers() + "/" + mcmanager.info.getMaximumPlayers() + ") " + mcmanager.info.getLatency() + "ms\n" + mcmanager.info.getSamplesFormatted();
+                    else if (mcmanager.info.hasError()) {
                         msg = "Fehlerhafte Antwort des Servers...";
                     } else {
                         msg = "Der Server ist nicht erreichbar...";
@@ -302,7 +251,7 @@ public class Bot extends AbilityBot {
     public Ability cmdSet() {
         return Ability.builder()
                 .name("set")
-                .info("Nutzer-Stats")
+                .info("Bearbeiten von Nutzer Stats")
                 .flag(update -> nutzermanager.hasNutzer(AbilityUtils.getUser(update).getId()))
                 .privacy(ADMIN)
                 .locality(GROUP)
@@ -369,7 +318,6 @@ public class Bot extends AbilityBot {
                 .input(0)
                 .action(ctx -> {
                     nutzermanager.loadNutzer();
-                    eventmanager.loadEvents();
                 })
                 .build();
     }
@@ -522,12 +470,11 @@ public class Bot extends AbilityBot {
     @SuppressWarnings("unused")
     public Ability cmdAdmin() {
         return Ability.builder()
-                .name("admin")
+                .name("addPoints")
                 .privacy(ADMIN)
                 .locality(USER)
                 .input(1)
                 .action(ctx -> {
-                    logger.debug("Admin Menu geoeffnet");
                     int points;
                     try {
                         points = Integer.valueOf(ctx.firstArg());
@@ -572,53 +519,12 @@ public class Bot extends AbilityBot {
                     Nutzer nutzer = nutzermanager.getNutzer(message.getFrom());
                     if (nutzer.getState().equals(State.Name)) {
                         onReplyUsernameChange(message, nutzer);
-                    } else if (nutzer.getState().equals(State.EventName)) {
-                        onReplyEventName(message, nutzer);
-                    } else if (nutzer.getState().equals(State.EventDesc)) {
-                        onReplyEventDesc(message, nutzer);
-                    } else if (nutzer.getState().equals(State.EventPts)) {
-                        onReplyEventPoints(message, nutzer);
-                    } else if (nutzer.getState().equals(State.Scan)) {
-                        onReplyEventQR(message, nutzer);
                     }
                 }
             } catch (TelegramApiException e) {
                 e.printStackTrace();
             }
         }, Flag.MESSAGE, Flag.REPLY, AbilityUtils::isUserMessage, isAbility().negate());
-    }
-
-    private void onReplyEventQR(Message message, Nutzer nutzer) {
-        if (message.hasPhoto()) {
-            ausgabe.sendKeyboard(message.getChatId(), getMainKeyboard(nutzer.getLocale()), nutzer.getLocale(), "user.event.scanned");
-            nutzer.setState(State.Default);
-        }
-    }
-
-    private void onReplyEventPoints(Message message, Nutzer nutzer) {
-        int i;
-        try {
-            i = Integer.valueOf(message.getText());
-        } catch (NumberFormatException e) {
-            ausgabe.send(message.getChatId(), nutzer.getLocale(), "error.int");
-            return;
-        }
-        nutzer.setState(State.Default);
-        Event event = eventmanager.createEvent(nutzer.getVar("eventName"), nutzer.getVar("eventDesc"), i, nutzer.getUserId());
-        ausgabe.sendOwnerEventCheck(nutzer, event);
-        ausgabe.sendKeyboard(message.getChatId(), getMainKeyboard(nutzer.getLocale()), nutzer.getLocale(), "user.event.request.sent");
-    }
-
-    private void onReplyEventDesc(Message message, Nutzer nutzer) {
-        nutzer.setState(State.EventPts);
-        nutzer.setVar("eventDesc", message.getText());
-        ausgabe.sendKeyboard(message.getChatId(), new ForceReplyKeyboard(), nutzer.getLocale(), "user.event.request.pts");
-    }
-
-    private void onReplyEventName(Message message, Nutzer nutzer) {
-        nutzer.setState(State.EventDesc);
-        nutzer.setVar("eventName", message.getText());
-        ausgabe.sendKeyboard(message.getChatId(), new ForceReplyKeyboard(), nutzer.getLocale(), "user.event.request.desc");
     }
 
     private void onReplyUsernameChange(Message message, Nutzer nutzer) {
@@ -641,12 +547,8 @@ public class Bot extends AbilityBot {
                 onUserMessageNamechange(message, nutzer);
             } else if (msg.equals(Ausgabe.format(nutzer.getLocale(), "user.shop.button"))) {
                 onUserMessageShop(message, nutzer);
-            } else if (msg.equals(Ausgabe.format(nutzer.getLocale(), "user.event.button"))) {
-                onUserMessageEvent(message, nutzer);
             } else if (msg.equals(Ausgabe.format(nutzer.getLocale(), "user.language.button"))) {
                 onUserMessageLanguage(message, nutzer);
-            } else if (msg.equals(Ausgabe.format(nutzer.getLocale(), "user.riddle.button"))) {
-                onUserMessageRiddle(message, nutzer);
             } else {
                 onUserMessageMain(message, nutzer);
             }
@@ -662,15 +564,6 @@ public class Bot extends AbilityBot {
         ausgabe.sendKeyboard(message.getChatId(), keyboard, nutzer.getLocale(), "user.language");
     }
 
-    private void onUserMessageEvent(Message message, Nutzer nutzer) {
-        InlineKeyboardMarkup keyboard = InlineKeyboardFactory.build()
-                .addRow(InlineKeyboardFactory.button(Ausgabe.format(nutzer.getLocale(), "user.event.scan.button"), "scan"))
-                .addRow(InlineKeyboardFactory.button(Ausgabe.format(nutzer.getLocale(), "user.event.request.button"), "registerEvent"))
-                .addRow(InlineKeyboardFactory.button(Ausgabe.format(nutzer.getLocale(), "user.event.manage.button"), "listEvents_0"))
-                .toMarkup();
-        ausgabe.sendKeyboard(message.getChatId(), keyboard, nutzer.getLocale(), "user.event");
-    }
-
     private void onUserMessageShop(Message message, Nutzer nutzer) {
         InlineKeyboardMarkup keyboard = InlineKeyboardFactory.build().addRow(InlineKeyboardFactory.button(Ausgabe.format(nutzer.getLocale(), "user.shop.entry", Ausgabe.format(nutzer.getLocale(), ShopItem.LanguageBox.title()), ShopItem.LanguageBox.price()), "shop_" + ShopItem.LanguageBox.data())).toMarkup();
         ausgabe.sendKeyboard(message.getChatId(), keyboard, nutzer.getLocale(), "user.shop", nutzer.getPoints());
@@ -679,14 +572,6 @@ public class Bot extends AbilityBot {
     private void onUserMessageNamechange(Message message, Nutzer nutzer) {
         nutzer.setState(State.Name);
         ausgabe.sendKeyboard(message.getChatId(), new ForceReplyKeyboard(), nutzer.getLocale(), "user.namechange");
-    }
-
-    private void onUserMessageRiddle(Message message, Nutzer nutzer) {
-        InlineKeyboardMarkup keyboard = InlineKeyboardFactory.build()
-                .addRow(InlineKeyboardFactory.button(Ausgabe.format(nutzer.getLocale(), "user.riddle.request.button"), "registerRiddle"))
-                .addRow(InlineKeyboardFactory.button(Ausgabe.format(nutzer.getLocale(), "user.riddle.manage.button"), "listRiddles_0"))
-                .toMarkup();
-        ausgabe.sendKeyboard(message.getChatId(), keyboard, nutzer.getLocale(), "user.riddle");
     }
 
     public Reply onInlineQuery() {
@@ -723,15 +608,6 @@ public class Bot extends AbilityBot {
                     case "cancel_shop":
                         onCallbackCancelShop(query, nutzer, message);
                         break;
-                    case "scan":
-                        onCallbackEventScan(query, nutzer, message);
-                        break;
-                    case "registerEvent":
-                        onCallbackRequestEvent(query, nutzer, message);
-                        break;
-                    case "registerRiddle":
-                        onCallbackRequestRiddle(query, nutzer, message);
-                        break;
                     case "justDeep":
                         onCallbackJustDeep(query, nutzer, message);
                         break;
@@ -747,47 +623,14 @@ public class Bot extends AbilityBot {
                         case "lng":
                             onCallbackLanguage(query, nutzer, message, parts[1]);
                             break;
-                        case "riddleEdit":
-                            onCallbackEditRiddle(query, nutzer, message, parts[1]);
-                            break;
-                        case "eventEdit":
-                            onCallbackEditEvent(query, nutzer, message, parts[1]);
-                            break;
-                        case "eventEditQR":
-                            onCallbackEditEventQR(query, nutzer, message, parts[1]);
-                            break;
-                        case "eventEditUsers":
-                            onCallbackEditEventUsers(query, nutzer, message, parts[1]);
-                            break;
-                        case "eventEditShowQR":
-                            onCallbackEditEventShowQR(query, nutzer, message, parts[1]);
-                            break;
-                        case "eventEditFinished":
-                            onCallbackEditEventFinished(query, nutzer, message, parts[1]);
-                            break;
-                        case "eventEditAnnounce":
-                            onCallbackEditEventAnnounce(query, nutzer, message, parts[1]);
-                            break;
-                        case "eventEditGroup":
-                            onCallbackEditEventGroup(query, nutzer, message, parts[1]);
-                            break;
                         case "listLangs":
                             onCallbackLanguagesPage(query, nutzer, message, parts[1]);
-                            break;
-                        case "listEvents":
-                            onCallbackEventsPage(query, nutzer, message, parts[1]);
-                            break;
-                        case "listRiddles":
-                            onCallbackRiddlesPage(query, nutzer, message, parts[1]);
                             break;
                     }
                     if (parts.length > 2) {
                         switch (parts[0]) {
                             case "admGroup":
                                 onCallbackAdminGroup(query, message, parts[1], parts[2]);
-                                break;
-                            case "admEvent":
-                                onCallbackAdminEvent(query, message, parts[1], parts[2]);
                                 break;
                         }
                     }
@@ -825,116 +668,11 @@ public class Bot extends AbilityBot {
         ausgabe.editCaption(query.getMessage().getChatId(), query.getMessage().getMessageId(), "Deep or Cheap? <b>" + ratingBool + "</b> (" + ratingInt + ")", getDeepOrCheapKeyboard());
     }
 
-
-    private void onCallbackEditEventShowQR(CallbackQuery query, Nutzer nutzer, Message message, String part) {
-        ausgabe.answerCallback(query.getId());
-        Optional<Event> opt = eventmanager.getEvent(Integer.valueOf(part));
-        if (opt.isEmpty()) return;
-        Event event = opt.get();
-        ausgabe.removeKeyboard(message.getChatId(), message.getMessageId());
-    }
-
-    private void onCallbackEditEventAnnounce(CallbackQuery query, Nutzer nutzer, Message message, String part) {
-        ausgabe.answerCallback(query.getId());
-        Optional<Event> opt = eventmanager.getEvent(Integer.valueOf(part));
-        if (opt.isEmpty()) return;
-        Event event = opt.get();
-        ausgabe.removeKeyboard(message.getChatId(), message.getMessageId());
-    }
-
-    private void onCallbackRequestEvent(CallbackQuery query, Nutzer nutzer, Message message) {
-        ausgabe.answerCallback(query.getId());
-        nutzer.setState(State.EventName);
-        ausgabe.removeKeyboard(message.getChatId(), message.getMessageId());
-        ausgabe.sendKeyboard(message.getChatId(), new ForceReplyKeyboard(), nutzer.getLocale(), "user.event.request.name");
-    }
-
-    private void onCallbackRequestRiddle(CallbackQuery query, Nutzer nutzer, Message message) {
-        //TODO
-    }
-
-    private void onCallbackEventScan(CallbackQuery query, Nutzer nutzer, Message message) {
-        ausgabe.answerCallback(query.getId());
-        nutzer.setState(State.Scan);
-        ausgabe.removeKeyboard(message.getChatId(), message.getMessageId());
-        ausgabe.sendKeyboard(message.getChatId(), new ForceReplyKeyboard(), nutzer.getLocale(), "user.event.scan");
-    }
-
-    private void onCallbackEventsPage(CallbackQuery query, Nutzer nutzer, Message message, String part) {
-        ausgabe.answerCallback(query.getId());
-        int seite = Integer.parseInt(part);
-        ausgabe.editKeyboard(message.getChatId(), message.getMessageId(), getEventsKeyboard(nutzer, seite), nutzer.getLocale(), "user.event.list");
-    }
-
-    private void onCallbackRiddlesPage(CallbackQuery query, Nutzer nutzer, Message message, String part) {
-        ausgabe.answerCallback(query.getId());
-        int seite = Integer.parseInt(part);
-        ausgabe.editKeyboard(message.getChatId(), message.getMessageId(), getRiddlesKeyboard(nutzer, seite), nutzer.getLocale(), "user.riddle.list");
-    }
-
     private void onCallbackLanguagesPage(CallbackQuery query, Nutzer nutzer, Message message, String part) {
 
         ausgabe.answerCallback(query.getId());
         int seite = Integer.parseInt(part);
         ausgabe.editKeyboard(message.getChatId(), message.getMessageId(), getLanguageKeyboard(nutzer, seite), nutzer.getLocale(), "user.language");
-    }
-
-    private void onCallbackEditEventGroup(CallbackQuery query, Nutzer nutzer, Message message, String part) {
-        ausgabe.answerCallback(query.getId());
-        Optional<Event> opt = eventmanager.getEvent(Integer.valueOf(part));
-        if (opt.isEmpty()) return;
-        Event event = opt.get();
-        event.setGroupJoin(!event.isGroupJoin());
-        ausgabe.editKeyboard(message.getChatId(), message.getMessageId(), getEventManageKeyboard(event, nutzer.getLocale()));
-    }
-
-    private void onCallbackEditEventFinished(CallbackQuery query, Nutzer nutzer, Message message, String part) {
-        ausgabe.answerCallback(query.getId());
-        Optional<Event> opt = eventmanager.getEvent(Integer.valueOf(part));
-        if (opt.isEmpty()) return;
-        Event event = opt.get();
-        ausgabe.removeKeyboard(message.getChatId(), message.getMessageId());
-
-    }
-
-    private void onCallbackEditEventUsers(CallbackQuery query, Nutzer nutzer, Message message, String part) {
-        ausgabe.answerCallback(query.getId());
-        Optional<Event> opt = eventmanager.getEvent(Integer.valueOf(part));
-        if (opt.isEmpty()) return;
-        Event event = opt.get();
-        ausgabe.removeKeyboard(message.getChatId(), message.getMessageId());
-
-    }
-
-    private void onCallbackEditEventQR(CallbackQuery query, Nutzer nutzer, Message message, String part) {
-        ausgabe.answerCallback(query.getId());
-        Optional<Event> opt = eventmanager.getEvent(Integer.valueOf(part));
-        if (opt.isEmpty()) return;
-        Event event = opt.get();
-        System.out.println(event.isQr());
-        event.setQr(!event.isQr());
-        System.out.println(event.isQr());
-        ausgabe.editKeyboard(message.getChatId(), message.getMessageId(), getEventManageKeyboard(event, nutzer.getLocale()));
-    }
-
-    private void onCallbackEditEvent(CallbackQuery query, Nutzer nutzer, Message message, String part) {
-        ausgabe.answerCallback(query.getId());
-        Optional<Event> opt = eventmanager.getEvent(Integer.valueOf(part));
-        if (opt.isEmpty()) return;
-        Event event = opt.get();
-        ausgabe.editKeyboard(message.getChatId(), message.getMessageId(), getEventManageKeyboard(event, nutzer.getLocale()), nutzer.getLocale(), "user.event.manage", event.isAccepted());
-    }
-
-
-    private void onCallbackEditRiddle(CallbackQuery query, Nutzer nutzer, Message message, String part) {
-        //TODO
-        ausgabe.answerCallback(query.getId());
-        Optional<Riddle> opt = riddlemanager.getRiddle(part);
-        if (opt.isEmpty()) return;
-        Riddle riddle = opt.get();
-
-        //TODO
-        //ausgabe.editKeyboard(message.getChatId(), message.getMessageId(), getRiddleManageKeyboard(riddle, nutzer.getLocale()), nutzer.getLocale(), "user.riddle.manage", riddle.isAccepted());
     }
 
     private void onCallbackLanguage(CallbackQuery query, Nutzer nutzer, Message message, String part) {
@@ -974,24 +712,6 @@ public class Bot extends AbilityBot {
                 ausgabe.edit(message.getChatId(), message.getMessageId(), nutzer.getLocale(), "user.shop.nomoney", Ausgabe.format(nutzer.getLocale(), shopItem.title()), shopItem.price(), nutzer.getPoints());
             }
         });
-    }
-
-    private void onCallbackAdminEvent(CallbackQuery query, Message message, String part1, String part2) {
-        ausgabe.answerCallback(query.getId());
-        if (!query.getFrom().getId().equals(creatorId())) return;
-        int eventId = Integer.parseInt(part2);
-        Optional<Event> optEvent = eventmanager.getEvent(eventId);
-        if (optEvent.isEmpty()) return;
-        Event event = optEvent.get();
-        if (part1.equals("+")) {
-            ausgabe.removeMessage(message.getChatId(), message.getMessageId());
-            event.setAccepted(true);
-            ausgabe.send((long) event.getCreator(), nutzermanager.getNutzer(event.getCreator()).getLocale(), "user.event.accepted");
-        } else if (part1.equals("-")) {
-            ausgabe.removeMessage(message.getChatId(), message.getMessageId());
-            eventmanager.removeEvent(eventId);
-            ausgabe.send((long) event.getCreator(), nutzermanager.getNutzer(event.getCreator()).getLocale(), "user.event.declined");
-        }
     }
 
     private void onCallbackAdminGroup(CallbackQuery query, Message message, String part1, String part2) {
@@ -1117,82 +837,10 @@ public class Bot extends AbilityBot {
         return factory.toMarkup();
     }
 
-    @SuppressWarnings("Duplicates")
-    private InlineKeyboardMarkup getEventsKeyboard(Nutzer nutzer, int seite) {
-        var ref = new Object() {
-            boolean lineBreak = false;
-            ArrayList<InlineKeyboardButton> row = new ArrayList<>();
-        };
-        List<Event> userEvents = eventmanager.getEventListe(nutzer.getUserId());
-        InlineKeyboardFactory factory = InlineKeyboardFactory.build();
-        userEvents.stream().sorted().limit(6 * (1 + seite)).skip(6 * seite).forEachOrdered(event -> {
-            ref.row.add(InlineKeyboardFactory.button(event.getName(), "eventEdit_" + event.getId()));
-            if (ref.lineBreak) {
-                factory.addRow(ref.row);
-                ref.row = new ArrayList<>();
-            }
-            ref.lineBreak = !ref.lineBreak;
-        });
-        if (ref.lineBreak) {
-            factory.addRow(ref.row);
-            ref.row = new ArrayList<>();
-        }
-        if (seite > 0)
-            ref.row.add(InlineKeyboardFactory.button("<<", "listEvents_" + (seite - 1)));
-        if (userEvents.size() > 6 * (1 + seite))
-            ref.row.add(InlineKeyboardFactory.button(">>", "listEvents_" + (seite + 1)));
-        if (!ref.row.isEmpty())
-            factory.addRow(ref.row);
-        if (!factory.hasRows())
-            factory.addRow(InlineKeyboardFactory.button(Ausgabe.format(nutzer.getLocale(), "user.event.list.none"), "none"));
-        return factory.toMarkup();
-    }
-
-    @SuppressWarnings("Duplicates")
-    private InlineKeyboardMarkup getRiddlesKeyboard(Nutzer nutzer, int seite) {
-        var ref = new Object() {
-            boolean lineBreak = false;
-            ArrayList<InlineKeyboardButton> row = new ArrayList<>();
-        };
-        List<Riddle> userRiddles = riddlemanager.getRiddleListe(nutzer.getUserId());
-        InlineKeyboardFactory factory = InlineKeyboardFactory.build();
-        userRiddles.stream().sorted().limit(6 * (1 + seite)).skip(6 * seite).forEachOrdered(riddle -> {
-            ref.row.add(InlineKeyboardFactory.button(riddle.getTitel(), "riddleEdit_" + riddle.getCode()));
-            if (ref.lineBreak) {
-                factory.addRow(ref.row);
-                ref.row = new ArrayList<>();
-            }
-            ref.lineBreak = !ref.lineBreak;
-        });
-        if (ref.lineBreak) {
-            factory.addRow(ref.row);
-            ref.row = new ArrayList<>();
-        }
-        if (seite > 0)
-            ref.row.add(InlineKeyboardFactory.button("<<", "listRiddles_" + (seite - 1)));
-        if (userRiddles.size() > 6 * (1 + seite))
-            ref.row.add(InlineKeyboardFactory.button(">>", "listRiddles_" + (seite + 1)));
-        if (!ref.row.isEmpty())
-            factory.addRow(ref.row);
-        if (!factory.hasRows())
-            factory.addRow(InlineKeyboardFactory.button(Ausgabe.format(nutzer.getLocale(), "user.riddle.list.none"), "none"));
-        return factory.toMarkup();
-    }
-
-    private InlineKeyboardMarkup getEventManageKeyboard(Event event, Locale locale) {
-        return InlineKeyboardFactory.build()
-                .addRow(InlineKeyboardFactory.button(Ausgabe.format(locale, "user.event.manage.qr.button", event.isQr() ? EMOJI_YES : EMOJI_NO), "eventEditQR_" + event.getId()), InlineKeyboardFactory.button(Ausgabe.format(locale, "user.event.manage.group.button", event.isGroupJoin() ? EMOJI_YES : EMOJI_NO), "eventEditGroup_" + event.getId()))
-                .addRow(InlineKeyboardFactory.button(Ausgabe.format(locale, "user.event.manage.showQR.button"), "eventEditShowQR_" + event.getId()), InlineKeyboardFactory.button(Ausgabe.format(locale, "user.event.manage.announce.button"), "eventEditAnnounce_" + event.getId()))
-                .addRow(InlineKeyboardFactory.button(Ausgabe.format(locale, "user.event.manage.users.button"), "eventEditUsers_" + event.getId()))
-                .addRow(InlineKeyboardFactory.button(Ausgabe.format(locale, "user.event.manage.finish.button"), "eventEditFinished_" + event.getId()))
-                .toMarkup();
-    }
-
 
     private ReplyKeyboard getMainKeyboard(Locale locale) {
         return ReplyKeyboardFactory.build()
-                .addRow(ReplyKeyboardFactory.button(Ausgabe.format(locale, "user.namechange.button")), ReplyKeyboardFactory.button(Ausgabe.format(locale, "user.riddle.button")))
-                .addRow(ReplyKeyboardFactory.button(Ausgabe.format(locale, "user.event.button")), ReplyKeyboardFactory.button(Ausgabe.format(locale, "user.language.button")))
+                .addRow(ReplyKeyboardFactory.button(Ausgabe.format(locale, "user.namechange.button")), ReplyKeyboardFactory.button(Ausgabe.format(locale, "user.language.button")))
                 .addRow(ReplyKeyboardFactory.button(Ausgabe.format(locale, "user.shop.button")))
                 .toMarkup();
     }

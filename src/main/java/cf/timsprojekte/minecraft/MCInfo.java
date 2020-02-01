@@ -1,4 +1,4 @@
-package cf.timsprojekte;
+package cf.timsprojekte.minecraft;
 
 import com.google.gson.*;
 
@@ -27,15 +27,6 @@ public class MCInfo {
 
     private ArrayList<MCPlayer> samples;
 
-    public static void main(String[] args) {
-        //"89.163.187.158"
-        //173.236.67.22
-        MCInfo mcinfo = MCInfo.request("89.163.187.158", 25565);
-        print(mcinfo);
-        mcinfo = MCInfo.request("89.163.187.158", 25565);
-        print(mcinfo);
-    }
-
     private static void print(MCInfo mcinfo) {
         System.out.println("Current Players: " + mcinfo.getCurrentPlayers());
         System.out.println("Max Players: " + mcinfo.getMaximumPlayers());
@@ -46,7 +37,7 @@ public class MCInfo {
     }
 
 
-    boolean isOnline() {
+    public boolean isOnline() {
         return online;
     }
 

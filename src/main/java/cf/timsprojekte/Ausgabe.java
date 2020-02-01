@@ -1,6 +1,5 @@
 package cf.timsprojekte;
 
-import cf.timsprojekte.db.Event;
 import cf.timsprojekte.db.Nutzer;
 import org.telegram.abilitybots.api.sender.MessageSender;
 import org.telegram.abilitybots.api.sender.SilentSender;
@@ -114,17 +113,6 @@ public class Ausgabe {
                 .addRow(InlineKeyboardFactory.button("Blockieren", "admGroup_-_" + chatId))
                 .toMarkup();
         silent.execute(new SendMessage().setText("Die Gruppe \"" + title + "\" <i>(" + chatId + ")</i> benutzt den Bot")
-                .setChatId(owner)
-                .setParseMode("HTML")
-                .setReplyMarkup(keyboard));
-    }
-
-    void sendOwnerEventCheck(Nutzer nutzer, Event event) {
-        InlineKeyboardMarkup keyboard = InlineKeyboardFactory.build()
-                .addRow(InlineKeyboardFactory.button("Hinzufügen", "admEvent_+_" + event.getId()))
-                .addRow(InlineKeyboardFactory.button("Blockieren", "admEvent_-_" + event.getId()))
-                .toMarkup();
-        silent.execute(new SendMessage().setText("Der Nutzer \"" + nutzer.getUsername() + "\" beantragt ein Event\n<b>" + event.getName() + "</b>\n" + event.getDesc() + "\n\nPunkte: " + event.getPoints())
                 .setChatId(owner)
                 .setParseMode("HTML")
                 .setReplyMarkup(keyboard));
