@@ -8,6 +8,7 @@ import java.util.Random;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
+import static cf.timsprojekte.Translation.*;
 
 public enum ShopItem {
     LanguageBox("language", "lng", 500, (data) -> {
@@ -22,14 +23,14 @@ public enum ShopItem {
             if (!set.get()) result.set(integer);
         });
         if(result.get()==-1){
-            data.getAusgabe().send(data.chatId, data.getNutzer().getLocale(), "error", "Kein Result?!");
+            data.getAusgabe().send(data.chatId, data.getNutzer().getLocale(), error, "Kein Result?!");
         }
         Language lang = lootMap.get(result.get());
         if (data.getNutzer().getLanguages().contains(lang)) {
-            data.getAusgabe().send(data.chatId, data.getNutzer().getLocale(), "shopItem.language.reward.double", lang.title());
+            data.getAusgabe().send(data.chatId, data.getNutzer().getLocale(), shopItem_language_reward_double, lang.title());
         } else {
             data.getNutzer().addLanguage(lang);
-            data.getAusgabe().send(data.chatId, data.getNutzer().getLocale(), "shopItem.language.reward", lang.title());
+            data.getAusgabe().send(data.chatId, data.getNutzer().getLocale(), shopItem_language_reward, lang.title());
         }
     });
 

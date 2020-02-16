@@ -7,6 +7,8 @@ import java.io.Serializable;
 import java.time.Instant;
 import java.time.temporal.TemporalUnit;
 import java.util.*;
+import static cf.timsprojekte.Translation.*;
+import static cf.timsprojekte.Translation.user_titlename;
 
 public class Nutzer implements Serializable {
 
@@ -124,32 +126,32 @@ public class Nutzer implements Serializable {
 
     @JsonIgnore
     public String getLinkedVotes() {
-        return Ausgabe.format(getLocale(), "user.namevotes", getUserId(), getUsername(), getVotes());
+        return Ausgabe.format(getLocale(), user_namevotes, getUserId(), getUsername(), getVotes());
     }
 
     @JsonIgnore
     public String getLinkedPoints() {
-        return Ausgabe.format(getLocale(), "user.titlenamepoints", getTitel(), getUserId(), getUsername(), getPoints(), getPointsNextLevel());
+        return Ausgabe.format(getLocale(), user_titlenamepoints, getTitel(), getUserId(), getUsername(), getPoints(), getPointsNextLevel());
     }
 
     @JsonIgnore
     public String getLinkedTitleUsername() {
-        return Ausgabe.format(getLocale(), "user.titlename", getTitel(), getUserId(), getUsername());
+        return Ausgabe.format(getLocale(), user_titlename, getTitel(), getUserId(), getUsername());
     }
 
     @JsonIgnore
     public String getLinkedUsername() {
-        return Ausgabe.format(getLocale(), "user.name", getUserId(), getUsername());
+        return Ausgabe.format(getLocale(), user_name, getUserId(), getUsername());
     }
 
     @JsonIgnore
     public String getLinkedPointListEntry() {
-        return Ausgabe.format(getLocale(), "user.entry.points", getLevel(), getTitel(), getUserId(), getUsername(), getPoints(), getPointsNextLevel());
+        return Ausgabe.format(getLocale(), user_entry_points, getLevel(), getTitel(), getUserId(), getUsername(), getPoints(), getPointsNextLevel());
     }
 
     @JsonIgnore
     public String getLinkedVoteListEntry() {
-        return Ausgabe.format(getLocale(), "user.entry.votes", getVotes(), getUserId(), getUsername());
+        return Ausgabe.format(getLocale(), user_entry_votes, getVotes(), getUserId(), getUsername());
     }
 
     @JsonIgnore

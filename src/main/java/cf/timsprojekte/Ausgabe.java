@@ -1,6 +1,7 @@
 package cf.timsprojekte;
 
 import cf.timsprojekte.db.Nutzer;
+import org.apache.log4j.*;
 import org.telegram.abilitybots.api.sender.MessageSender;
 import org.telegram.abilitybots.api.sender.SilentSender;
 import org.telegram.telegrambots.meta.api.methods.AnswerCallbackQuery;
@@ -21,6 +22,7 @@ import java.util.stream.Collectors;
 
 public class Ausgabe {
 
+    private static final Logger logger = LogManager.getLogger(Ausgabe.class);
     private long owner;
     private List<Long> listGroups;
     private SilentSender silent;
@@ -35,13 +37,27 @@ public class Ausgabe {
         this.groupLocale = groupLocale;
         this.sender = sender;
         toBeRemoved = new ArrayList<>();
+        FileAppender fileAppender = new FileAppender();
+        fileAppender.setName("FileLogger");
+        fileAppender.setFile("gotteslachs.tglog");
+        String PATTERN = "%d | %-5p | %c{1} | %m%n";
+        fileAppender.setLayout(new PatternLayout(PATTERN));
+        fileAppender.setThreshold(Level.INFO);
+        fileAppender.setAppend(true);
+        fileAppender.activateOptions();
+        logger.addAppender(fileAppender);
+        ConsoleAppender consoleAppender = new ConsoleAppender();
+        consoleAppender.setLayout(fileAppender.getLayout());
+        consoleAppender.setThreshold(Level.ERROR);
+        consoleAppender.activateOptions();
+        logger.addAppender(consoleAppender);
     }
 
     void answerCallback(String id) {
         silent.execute(new AnswerCallbackQuery().setCallbackQueryId(id));
     }
 
-    private void sendToAllGroups(String key, Locale locale, Object... arguments) {
+    private void sendToAllGroups(Translation key, Locale locale, Object... arguments) {
         listGroups.forEach(group ->
                 send(group, locale, key, arguments));
     }
@@ -53,19 +69,19 @@ public class Ausgabe {
         });
     }
 
-    void sendToAllGroups(String key, Object... arguments) {
+    void sendToAllGroups(Translation key, Object... arguments) {
         sendToAllGroups(key, groupLocale, arguments);
     }
 
-    Optional<Message> sendToGroup(Long chatId, String key, Object... arguments) {
+    Optional<Message> sendToGroup(Long chatId, Translation key, Object... arguments) {
         return send(chatId, groupLocale, key, arguments);
     }
 
-    Optional<Message> send(Long chatId, Locale locale, String key, Object... arguments) {
+    Optional<Message> send(Long chatId, Locale locale, Translation key, Object... arguments) {
         return silent.execute(new SendMessage().setChatId(chatId).setText(format(locale, key, arguments)).setParseMode("HTML"));
     }
 
-    void edit(Long chatId, Integer messageId, Locale locale, String key, Object... arguments) {
+    void edit(Long chatId, Integer messageId, Locale locale, Translation key, Object... arguments) {
         silent.execute(new EditMessageText().setText(format(locale, key, arguments)).setChatId(chatId).setMessageId(messageId));
     }
 
@@ -80,7 +96,7 @@ public class Ausgabe {
         return message;
     }
 
-    Optional<Message> sendTemp(Long id, Locale locale, String key, Object... arguments) {
+    Optional<Message> sendTemp(Long id, Locale locale, Translation key, Object... arguments) {
         Optional<Message> message = silent.execute(new SendMessage().setChatId(id)
                 .setText(format(locale, key, arguments))
                 .setParseMode("HTML"));
@@ -88,7 +104,7 @@ public class Ausgabe {
         return message;
     }
 
-    void sendTempClear(Long id, Locale locale, String key, Object... arguments) {
+    void sendTempClear(Long id, Locale locale, Translation key, Object... arguments) {
         clear();
         sendTemp(id, locale, key, arguments);
     }
@@ -98,11 +114,16 @@ public class Ausgabe {
         toBeRemoved.clear();
     }
 
-    public static String format(Locale locale, String key, Object... arguments) {
+    public static String format(Locale locale, Translation key, Object... arguments) {
+        return formatRaw(locale,key.getKey(),arguments);
+    }
+
+    public static String formatRaw(Locale locale, String key, Object... arguments) {
         try {
             return new MessageFormat(ResourceBundle.getBundle("messages/Nachrichten", locale).getString(key), locale).format(arguments);
         } catch (MissingResourceException e) {
-            System.err.println("MISSING [" + key + "][" + locale.toString() + "][" + Arrays.stream(arguments).map(Object::toString).collect(Collectors.joining(",")) + "]");
+            if(logger!=null)
+                logger.error("MISSING [" + key + "][" + locale.toString() + "][" + Arrays.stream(arguments).map(Object::toString).collect(Collectors.joining(",")) + "]");
             return "[" + key + "][" + locale.toString() + "][" + Arrays.stream(arguments).map(Object::toString).collect(Collectors.joining(",")) + "]";
         }
     }
@@ -126,7 +147,7 @@ public class Ausgabe {
         return silent.execute(new SendMessage().setChatId(chatId).setText(msg).setParseMode("HTML"));
     }
 
-    private void sendImage(Long chatId, Locale locale, String key, String url, Object... arguments) {
+    private void sendImage(Long chatId, Locale locale, Translation key, String url, Object... arguments) {
         try {
             sender.sendPhoto(new SendPhoto().setChatId(chatId).setCaption(format(locale, key, arguments)).setParseMode("HTML").setPhoto(url));
         } catch (TelegramApiException e) {
@@ -161,17 +182,17 @@ public class Ausgabe {
     }
 
 
-    void sendImageToAll(Locale locale, String key, String url, Object... arguments) {
+    void sendImageToAll(Locale locale, Translation key, String url, Object... arguments) {
         listGroups.forEach(group ->
                 sendImage(group, locale, key, url, arguments));
     }
 
-    Optional<Message> sendKeyboard(Long chatId, ReplyKeyboard keyboard, Locale locale, String key, Object... arguments) {
+    Optional<Message> sendKeyboard(Long chatId, ReplyKeyboard keyboard, Locale locale, Translation key, Object... arguments) {
         return silent.execute(new SendMessage().setChatId(chatId).setText(format(locale, key, arguments)).setParseMode("HTML").setReplyMarkup(keyboard));
 
     }
 
-    void editKeyboard(Long chatId, Integer messageId, InlineKeyboardMarkup keyboard, Locale locale, String key, Object... arguments) {
+    void editKeyboard(Long chatId, Integer messageId, InlineKeyboardMarkup keyboard, Locale locale, Translation key, Object... arguments) {
         silent.execute(new EditMessageText().setText(format(locale, key, arguments)).setChatId(chatId).setMessageId(messageId).setReplyMarkup(keyboard));
     }
 

@@ -42,6 +42,10 @@ public enum Language {
         return locale.toString();
     }
 
+    public Locale locale() {
+        return locale;
+    }
+
     public int rarity() {
         return rarity;
     }

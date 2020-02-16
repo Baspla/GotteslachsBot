@@ -21,5 +21,4 @@ public class Main {
         ApiContextInitializer.init();
         SpringApplication.run(Bot.class, args);
     }
-
 }

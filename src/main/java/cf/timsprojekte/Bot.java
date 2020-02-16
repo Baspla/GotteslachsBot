@@ -11,6 +11,8 @@ import org.telegram.abilitybots.api.db.MapDBContext;
 import org.telegram.abilitybots.api.objects.*;
 import org.telegram.abilitybots.api.util.AbilityUtils;
 import org.telegram.telegrambots.meta.TelegramBotsApi;
+import org.telegram.telegrambots.meta.api.methods.GetFile;
+import org.telegram.telegrambots.meta.api.methods.GetUserProfilePhotos;
 import org.telegram.telegrambots.meta.api.methods.groupadministration.LeaveChat;
 import org.telegram.telegrambots.meta.api.objects.*;
 import org.telegram.telegrambots.meta.api.objects.inlinequery.InlineQuery;
@@ -23,8 +25,10 @@ import javax.annotation.PostConstruct;
 import javax.imageio.ImageIO;
 import java.awt.*;
 import java.awt.font.*;
+import java.awt.geom.RoundRectangle2D;
 import java.awt.image.*;
 import java.io.*;
+import java.io.File;
 import java.text.AttributedCharacterIterator;
 import java.text.AttributedString;
 import java.time.temporal.ChronoUnit;
@@ -33,6 +37,7 @@ import java.util.List;
 import java.util.concurrent.*;
 import java.util.function.Predicate;
 
+import static cf.timsprojekte.Translation.*;
 import static org.telegram.abilitybots.api.objects.Locality.*;
 import static org.telegram.abilitybots.api.objects.Privacy.ADMIN;
 import static org.telegram.abilitybots.api.objects.Privacy.PUBLIC;
@@ -117,9 +122,8 @@ public class Bot extends AbilityBot {
         };
 
 
-
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            logger.info("Shutdown Hook triggered");
+            logger.info("Shutdown Hook ausgeführt");
             saveRunnable.run();
             try {
                 db.close();
@@ -139,28 +143,12 @@ public class Bot extends AbilityBot {
             e.printStackTrace();
         }
         if (ANNOUNCE_STARTUP)
-            ausgabe.sendToAllGroups("system.started");
+            ausgabe.sendToAllGroups(system_started);
     }
 
     //
     // COMMANDS
     //
-
-    @SuppressWarnings({"unused", "unchecked"})
-    public Ability cmdStats() {
-        return Ability.builder()
-                .name("stats")
-                .info("Nutzer-Stats")
-                .flag(update -> nutzermanager.hasNutzer(AbilityUtils.getUser(update).getId()))
-                .privacy(PUBLIC)
-                .locality(USER)
-                .input(0)
-                .action(ctx -> {
-                    Nutzer nutzer = nutzermanager.getNutzer(ctx.user());
-                    ausgabe.send(ctx.chatId(), nutzer.getLocale(), "user.stats", nutzer.getUserId(), nutzer.getUsername(), nutzer.getPoints(), nutzer.getVotes(), nutzer.getLocale().toString());//TODO
-                })
-                .build();
-    }
 
     @SuppressWarnings({"unused", "unchecked"})
     public Ability cmdServer() {
@@ -192,7 +180,7 @@ public class Bot extends AbilityBot {
                 .action(ctx -> {
                     Nutzer nutzer = nutzermanager.getNutzer(ctx.user());
                     if (ctx.arguments().length < 2) {
-                        ausgabe.sendTemp(ctx.chatId(), nutzer.getLocale(), "code.moreArgs");
+                        ausgabe.sendTemp(ctx.chatId(), nutzer.getLocale(), code_moreArgs);
                         return;
                     }
                     StringBuilder text = new StringBuilder();
@@ -201,13 +189,14 @@ public class Bot extends AbilityBot {
                     }
                     if (!codemanager.contains(ctx.firstArg())) {
                         if (!ctx.firstArg().matches("\\d+(-\\d+)?")) {
-                            ausgabe.sendTemp(ctx.chatId(), nutzer.getLocale(), "code.invalid", ctx.firstArg());
+                            ausgabe.sendTemp(ctx.chatId(), nutzer.getLocale(), code_invalid, ctx.firstArg());
                         } else {
-                            ausgabe.send(ctx.chatId(), nutzer.getLocale(), "code.set", ctx.firstArg(), text.toString());
+                            ausgabe.send(ctx.chatId(), nutzer.getLocale(), code_set, ctx.firstArg(), text.toString());
                             codemanager.add(ctx.firstArg(), text.toString());
+                            logger.info("Code "+ctx.firstArg()+" von "+nutzer.getUsername()+" hinzugefügt. \""+text.toString()+"\"");
                         }
                     } else {
-                        ausgabe.sendTemp(ctx.chatId(), nutzer.getLocale(), "code.taken", ctx.firstArg());
+                        ausgabe.sendTemp(ctx.chatId(), nutzer.getLocale(), code_taken, ctx.firstArg());
                     }
                 })
                 .build();
@@ -215,7 +204,7 @@ public class Bot extends AbilityBot {
 
     public Ability cmdCodes() {
         return Ability.builder()
-                .name("codes")
+                .name("codelist")
                 .privacy(PUBLIC)
                 .locality(ALL)
                 .input(0)
@@ -226,53 +215,163 @@ public class Bot extends AbilityBot {
                 .build();
     }
 
+    public Ability cmdStats() {
+        return Ability.builder()
+                .name("stats")
+                .privacy(PUBLIC)
+                .locality(ALL)
+                .input(0)
+                .action(ctx -> {
+                    Nutzer nutzer = nutzermanager.getNutzer(ctx.user());
+                    User target = ctx.user();
+                    if (ctx.update().getMessage().isReply()) {
+                        target = ctx.update().getMessage().getReplyToMessage().getFrom();
+                    }
+                    if (target.getBot()) {
+                        ausgabe.send(ctx.chatId(), nutzer.getLocale(), stats_bot);
+                        return;
+                    }
+                    try {
+                        BufferedImage photo = generateStatsImage(target);
+                        ByteArrayOutputStream os = new ByteArrayOutputStream();
+                        ImageIO.write(photo, "png", os);
+                        ausgabe.sendImage(ctx.chatId(), "stats", new ByteArrayInputStream(os.toByteArray()));
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+                })
+                .build();
+    }
+
     public Ability cmdRemoveCode() {
         return Ability.builder()
-                .name("rmcode")
+                .name("removecode")
                 .privacy(ADMIN)
                 .locality(ALL)
                 .action(ctx -> {
                     Nutzer nutzer = nutzermanager.getNutzer(ctx.user());
                     if (ctx.arguments().length < 1) {
-                        ausgabe.sendTemp(ctx.chatId(), nutzer.getLocale(), "code.moreArgs");
+                        ausgabe.sendTemp(ctx.chatId(), nutzer.getLocale(), code_moreArgs);
                         return;
                     }
                     if (codemanager.contains(ctx.firstArg())) {
-                        ausgabe.sendTemp(ctx.chatId(), nutzer.getLocale(), "code.removed", ctx.firstArg());
+                        ausgabe.sendTemp(ctx.chatId(), nutzer.getLocale(), code_removed, ctx.firstArg());
                         codemanager.remove(ctx.firstArg());
                     } else {
-                        ausgabe.sendTemp(ctx.chatId(), nutzer.getLocale(), "code.nonexistent", ctx.firstArg());
+                        ausgabe.sendTemp(ctx.chatId(), nutzer.getLocale(), code_nonexistent, ctx.firstArg());
                     }
                 })
                 .build();
     }
 
     @SuppressWarnings({"unused", "unchecked"})
-    public Ability cmdSet() {
+    public Ability cmdAddPoints() {
         return Ability.builder()
-                .name("set")
-                .info("Bearbeiten von Nutzer Stats")
+                .name("addPoints")
+                .info("Punkte hinzufügen")
                 .flag(update -> nutzermanager.hasNutzer(AbilityUtils.getUser(update).getId()))
                 .privacy(ADMIN)
                 .locality(GROUP)
-                .input(2)
+                .input(1)
                 .action(ctx -> {
                     if (ctx.update().hasMessage()) {
                         if (ctx.update().getMessage().isReply()) {
                             Nutzer replyTo = nutzermanager.getNutzer(ctx.update().getMessage().getReplyToMessage().getFrom().getId());
-                            int pts, votes;
+                            int pts;
                             try {
                                 pts = Integer.parseInt(ctx.firstArg());
-                                votes = Integer.parseInt(ctx.secondArg());
                             } catch (NumberFormatException e) {
                                 return;
                             }
-                            replyTo.setPoints(pts);
-                            replyTo.setVotes(votes);
-                            ausgabe.sendRaw(ctx.chatId(), replyTo.getUsername() + " auf " + pts + " Punkte und " + votes + " Ehre gesetzt.");
+                            int vorher = replyTo.getLevel();
+                            replyTo.addPoints(pts);
+                            checkLevelUp(replyTo, vorher);
+                            //TODO Announce
                         }
                     }
-                    Nutzer nutzer = nutzermanager.getNutzer(ctx.user());
+                })
+                .build();
+    }
+
+    @SuppressWarnings({"unused", "unchecked"})
+    public Ability cmdAddVotes() {
+        return Ability.builder()
+                .name("addVotes")
+                .info("Votes hinzufügen")
+                .flag(update -> nutzermanager.hasNutzer(AbilityUtils.getUser(update).getId()))
+                .privacy(ADMIN)
+                .locality(GROUP)
+                .input(1)
+                .action(ctx -> {
+                    if (ctx.update().hasMessage()) {
+                        if (ctx.update().getMessage().isReply()) {
+                            Nutzer replyTo = nutzermanager.getNutzer(ctx.update().getMessage().getReplyToMessage().getFrom().getId());
+                            int votes;
+                            try {
+                                votes = Integer.parseInt(ctx.firstArg());
+                            } catch (NumberFormatException e) {
+                                return;
+                            }
+                            replyTo.addVote(votes);
+                            //TODO Announce
+                        }
+                    }
+                })
+                .build();
+    }
+
+    @SuppressWarnings({"unused", "unchecked"})
+    public Ability cmdSetPoints() {
+        return Ability.builder()
+                .name("setPoints")
+                .info("Punkte setzen")
+                .flag(update -> nutzermanager.hasNutzer(AbilityUtils.getUser(update).getId()))
+                .privacy(ADMIN)
+                .locality(GROUP)
+                .input(1)
+                .action(ctx -> {
+                    if (ctx.update().hasMessage()) {
+                        if (ctx.update().getMessage().isReply()) {
+                            Nutzer replyTo = nutzermanager.getNutzer(ctx.update().getMessage().getReplyToMessage().getFrom().getId());
+                            int pts;
+                            try {
+                                pts = Integer.parseInt(ctx.firstArg());
+                            } catch (NumberFormatException e) {
+                                return;
+                            }
+                            int vorher = replyTo.getLevel();
+                            replyTo.setPoints(pts);
+                            checkLevelUp(replyTo, vorher);
+                            //TODO Announce
+                        }
+                    }
+                })
+                .build();
+    }
+
+    @SuppressWarnings({"unused", "unchecked"})
+    public Ability cmdSetVotes() {
+        return Ability.builder()
+                .name("setVotes")
+                .info("Votes setzen")
+                .flag(update -> nutzermanager.hasNutzer(AbilityUtils.getUser(update).getId()))
+                .privacy(ADMIN)
+                .locality(GROUP)
+                .input(1)
+                .action(ctx -> {
+                    if (ctx.update().hasMessage()) {
+                        if (ctx.update().getMessage().isReply()) {
+                            Nutzer replyTo = nutzermanager.getNutzer(ctx.update().getMessage().getReplyToMessage().getFrom().getId());
+                            int votes;
+                            try {
+                                votes = Integer.parseInt(ctx.firstArg());
+                            } catch (NumberFormatException e) {
+                                return;
+                            }
+                            replyTo.setVotes(votes);
+                            //TODO Announce
+                        }
+                    }
                 })
                 .build();
     }
@@ -285,7 +384,7 @@ public class Bot extends AbilityBot {
                 .locality(ALL)
                 .input(0)
                 .action(ctx -> {
-                    ausgabe.send(ctx.chatId(), nutzermanager.getNutzer(ctx.user()).getLocale(), "system.shutdown");
+                    ausgabe.send(ctx.chatId(), nutzermanager.getNutzer(ctx.user()).getLocale(), system_shutdown);
                     nutzermanager.saveNutzer();
                     db.commit();
                     System.exit(0);
@@ -301,10 +400,10 @@ public class Bot extends AbilityBot {
                 .locality(ALL)
                 .input(0)
                 .action(ctx -> {
-                    Optional<Message> r = ausgabe.send(ctx.chatId(), nutzermanager.getNutzer(ctx.user()).getLocale(), "system.saving");
+                    Optional<Message> r = ausgabe.send(ctx.chatId(), nutzermanager.getNutzer(ctx.user()).getLocale(), system_saving);
                     saveRunnable.run();
                     db.commit();
-                    r.ifPresent(message -> ausgabe.edit(message.getChatId(), message.getMessageId(), nutzermanager.getNutzer(ctx.user()).getLocale(), "system.saved"));
+                    r.ifPresent(message -> ausgabe.edit(message.getChatId(), message.getMessageId(), nutzermanager.getNutzer(ctx.user()).getLocale(), system_saved));
                 })
                 .build();
     }
@@ -318,6 +417,7 @@ public class Bot extends AbilityBot {
                 .input(0)
                 .action(ctx -> {
                     nutzermanager.loadNutzer();
+
                 })
                 .build();
     }
@@ -331,7 +431,7 @@ public class Bot extends AbilityBot {
                 .input(0)
                 .action(ctx -> {
                     Nutzer nutzer = nutzermanager.getNutzer(ctx.user());
-                    ausgabe.sendKeyboard(ctx.chatId(), getMainKeyboard(nutzer.getLocale()), nutzer.getLocale(), "canceled");
+                    ausgabe.sendKeyboard(ctx.chatId(), getMainKeyboard(nutzer.getLocale()), nutzer.getLocale(), canceled);
                     nutzer.setState(State.Default);
                 })
                 .build();
@@ -346,7 +446,6 @@ public class Bot extends AbilityBot {
                 .locality(ALL)
                 .input(0)
                 .action(ctx -> {
-                    logger.debug("Top Points abgefragt");
                     List<Nutzer> topList = nutzermanager.getNutzerListeTopPoints(10);
                     StringBuilder msg = new StringBuilder("Top-Liste:\n");
                     topList.forEach(entry -> msg.append(entry.getLinkedPointListEntry()).append("\n"));
@@ -364,7 +463,6 @@ public class Bot extends AbilityBot {
                 .locality(ALL)
                 .input(0)
                 .action(ctx -> {
-                    logger.debug("r/place");
                     Nutzer nutzer = nutzermanager.getNutzer(ctx.user());
                     if (ctx.arguments().length == 0) {
                         //Ausgabe
@@ -458,33 +556,10 @@ public class Bot extends AbilityBot {
                 .locality(ALL)
                 .input(0)
                 .action(ctx -> {
-                    logger.debug("Top Rep abgefragt");
                     List<Nutzer> topList = nutzermanager.getNutzerListeTopVotes(10);
                     StringBuilder msg = new StringBuilder("Top-Liste:\n");
                     topList.forEach(entry -> msg.append(entry.getLinkedVoteListEntry()).append("\n"));
                     ausgabe.sendRaw(ctx.chatId(), msg.toString());
-                })
-                .build();
-    }
-
-    @SuppressWarnings("unused")
-    public Ability cmdAdmin() {
-        return Ability.builder()
-                .name("addPoints")
-                .privacy(ADMIN)
-                .locality(USER)
-                .input(1)
-                .action(ctx -> {
-                    int points;
-                    try {
-                        points = Integer.valueOf(ctx.firstArg());
-                    } catch (NumberFormatException e) {
-                        return;
-                    }
-                    Nutzer nutzer = nutzermanager.getNutzer(ctx.user());
-                    int levelVorher = nutzer.getLevel();
-                    nutzer.addPoints(points);
-                    checkLevelUp(nutzer, levelVorher);
                 })
                 .build();
     }
@@ -497,7 +572,6 @@ public class Bot extends AbilityBot {
                 .locality(USER)
                 .input(0)
                 .action(ctx -> {
-                    logger.debug("Chances geoeffnet");
                     StringBuilder stringBuilder = new StringBuilder();
                     Pair<Integer, HashMap<Integer, Language>> m = Language.getLootMap();
                     m.component2().values().forEach((lang) -> stringBuilder.append(lang.title()).append(" | ").append((float) lang.rarity() / m.component1()).append("%\n"));
@@ -530,10 +604,10 @@ public class Bot extends AbilityBot {
     private void onReplyUsernameChange(Message message, Nutzer nutzer) {
         if (isUsernameValid(message.getText())) {
             nutzer.setUsername(message.getText());
-            ausgabe.sendKeyboard(message.getChatId(), getMainKeyboard(nutzer.getLocale()), nutzer.getLocale(), "user.namechange.changed", nutzer.getUsername());
+            ausgabe.sendKeyboard(message.getChatId(), getMainKeyboard(nutzer.getLocale()), nutzer.getLocale(), user_namechange_changed, nutzer.getUsername());
             nutzer.setState(State.Default);
         } else {
-            ausgabe.sendKeyboard(message.getChatId(), getMainKeyboard(nutzer.getLocale()), nutzer.getLocale(), "user.namechange.unchanged");
+            ausgabe.sendKeyboard(message.getChatId(), getMainKeyboard(nutzer.getLocale()), nutzer.getLocale(), user_namechange_unchanged);
         }
     }
 
@@ -543,11 +617,11 @@ public class Bot extends AbilityBot {
             Message message = update.getMessage();
             Nutzer nutzer = nutzermanager.getNutzer(message.getFrom());
             String msg = update.getMessage().getText();
-            if (msg.equals(Ausgabe.format(nutzer.getLocale(), "user.namechange.button"))) {
+            if (msg.equals(Ausgabe.format(nutzer.getLocale(), user_namechange_button))) {
                 onUserMessageNamechange(message, nutzer);
-            } else if (msg.equals(Ausgabe.format(nutzer.getLocale(), "user.shop.button"))) {
+            } else if (msg.equals(Ausgabe.format(nutzer.getLocale(), user_shop_button))) {
                 onUserMessageShop(message, nutzer);
-            } else if (msg.equals(Ausgabe.format(nutzer.getLocale(), "user.language.button"))) {
+            } else if (msg.equals(Ausgabe.format(nutzer.getLocale(), user_language_button))) {
                 onUserMessageLanguage(message, nutzer);
             } else {
                 onUserMessageMain(message, nutzer);
@@ -556,22 +630,22 @@ public class Bot extends AbilityBot {
     }
 
     private void onUserMessageMain(Message message, Nutzer nutzer) {
-        ausgabe.sendKeyboard(message.getChatId(), getMainKeyboard(nutzer.getLocale()), nutzer.getLocale(), "user.main");
+        ausgabe.sendKeyboard(message.getChatId(), getMainKeyboard(nutzer.getLocale()), nutzer.getLocale(), user_main);
     }
 
     private void onUserMessageLanguage(Message message, Nutzer nutzer) {
         InlineKeyboardMarkup keyboard = getLanguageKeyboard(nutzer, 0);
-        ausgabe.sendKeyboard(message.getChatId(), keyboard, nutzer.getLocale(), "user.language");
+        ausgabe.sendKeyboard(message.getChatId(), keyboard, nutzer.getLocale(), user_language);
     }
 
     private void onUserMessageShop(Message message, Nutzer nutzer) {
-        InlineKeyboardMarkup keyboard = InlineKeyboardFactory.build().addRow(InlineKeyboardFactory.button(Ausgabe.format(nutzer.getLocale(), "user.shop.entry", Ausgabe.format(nutzer.getLocale(), ShopItem.LanguageBox.title()), ShopItem.LanguageBox.price()), "shop_" + ShopItem.LanguageBox.data())).toMarkup();
-        ausgabe.sendKeyboard(message.getChatId(), keyboard, nutzer.getLocale(), "user.shop", nutzer.getPoints());
+        InlineKeyboardMarkup keyboard = InlineKeyboardFactory.build().addRow(InlineKeyboardFactory.button(Ausgabe.format(nutzer.getLocale(), user_shop_entry, Ausgabe.formatRaw(nutzer.getLocale(), ShopItem.LanguageBox.title()), ShopItem.LanguageBox.price()), "shop_" + ShopItem.LanguageBox.data())).toMarkup();
+        ausgabe.sendKeyboard(message.getChatId(), keyboard, nutzer.getLocale(), user_shop, nutzer.getPoints());
     }
 
     private void onUserMessageNamechange(Message message, Nutzer nutzer) {
         nutzer.setState(State.Name);
-        ausgabe.sendKeyboard(message.getChatId(), new ForceReplyKeyboard(), nutzer.getLocale(), "user.namechange");
+        ausgabe.sendKeyboard(message.getChatId(), new ForceReplyKeyboard(), nutzer.getLocale(), user_namechange);
     }
 
     public Reply onInlineQuery() {
@@ -599,7 +673,6 @@ public class Bot extends AbilityBot {
             String[] parts = data.split("_");
             Nutzer nutzer = nutzermanager.getNutzer(update.getCallbackQuery().getFrom());
             Message message = update.getCallbackQuery().getMessage();
-            logger.debug("Callback von " + nutzer.getUsername() + " mit " + data);
             if (parts.length > 0) {
                 switch (parts[0]) {
                     case "none":
@@ -628,10 +701,8 @@ public class Bot extends AbilityBot {
                             break;
                     }
                     if (parts.length > 2) {
-                        switch (parts[0]) {
-                            case "admGroup":
-                                onCallbackAdminGroup(query, message, parts[1], parts[2]);
-                                break;
+                        if ("admGroup".equals(parts[0])) {
+                            onCallbackAdminGroup(query, message, parts[1], parts[2]);
                         }
                     }
                 }
@@ -653,7 +724,6 @@ public class Bot extends AbilityBot {
         if (t == null) t = "";
         int ratingInt = 0;
         t = t.substring(t.indexOf("(") + 1, t.length() - 1);
-        System.out.println(t);
         try {
             ratingInt = Integer.parseInt(t);
         } catch (NumberFormatException e) {
@@ -672,7 +742,7 @@ public class Bot extends AbilityBot {
 
         ausgabe.answerCallback(query.getId());
         int seite = Integer.parseInt(part);
-        ausgabe.editKeyboard(message.getChatId(), message.getMessageId(), getLanguageKeyboard(nutzer, seite), nutzer.getLocale(), "user.language");
+        ausgabe.editKeyboard(message.getChatId(), message.getMessageId(), getLanguageKeyboard(nutzer, seite), nutzer.getLocale(), user_language);
     }
 
     private void onCallbackLanguage(CallbackQuery query, Nutzer nutzer, Message message, String part) {
@@ -681,13 +751,13 @@ public class Bot extends AbilityBot {
         if (lang.isEmpty()) return;
         String[] splits = lang.get().data().split("_");
         nutzer.setLocale((splits.length > 0) ? splits[0] : null, (splits.length > 1) ? splits[1] : null, (splits.length > 2) ? splits[2] : null);
-        ausgabe.editKeyboard(message.getChatId(), message.getMessageId(), null, nutzer.getLocale(), "user.language.set", lang.get().title());
+        ausgabe.editKeyboard(message.getChatId(), message.getMessageId(), null, nutzer.getLocale(), user_language_set, lang.get().title());
     }
 
     private void onCallbackCancelShop(CallbackQuery query, Nutzer nutzer, Message message) {
         ausgabe.answerCallback(query.getId());
         ausgabe.removeKeyboard(message.getChatId(), message.getMessageId());
-        ausgabe.send(message.getChatId(), nutzer.getLocale(), "user.shop.canceled");
+        ausgabe.send(message.getChatId(), nutzer.getLocale(), user_shop_canceled);
     }
 
     private void onCallbackShop(CallbackQuery query, Nutzer nutzer, Message message, String[] parts) {
@@ -698,18 +768,19 @@ public class Bot extends AbilityBot {
                     if (parts[2].equals("buy")) {
                         ausgabe.removeKeyboard(message.getChatId(), message.getMessageId());
                         nutzer.removePoints(shopItem.price());
-                        ausgabe.send(message.getChatId(), nutzer.getLocale(), "user.shop.bought", Ausgabe.format(nutzer.getLocale(), shopItem.title()), shopItem.price(), nutzer.getPoints());
+                        ausgabe.send(message.getChatId(), nutzer.getLocale(), user_shop_bought, Ausgabe.formatRaw(nutzer.getLocale(), shopItem.title()), shopItem.price(), nutzer.getPoints());
                         shopItem.onBuy(nutzer, ausgabe, message.getChatId());
+                        logger.info(nutzer.getUsername()+" hat "+shopItem.name()+" gekauft");
                     }
                 } else {
                     ausgabe.editKeyboard(message.getChatId(), message.getMessageId(), InlineKeyboardFactory.build()
-                                    .addRow(InlineKeyboardFactory.button(Ausgabe.format(nutzer.getLocale(), "user.shop.buy"), "shop_" + shopItem.data() + "_buy"))
-                                    .addRow(InlineKeyboardFactory.button(Ausgabe.format(nutzer.getLocale(), "user.shop.cancel"), "cancel_shop"))
+                                    .addRow(InlineKeyboardFactory.button(Ausgabe.format(nutzer.getLocale(), user_shop_buy), "shop_" + shopItem.data() + "_buy"))
+                                    .addRow(InlineKeyboardFactory.button(Ausgabe.format(nutzer.getLocale(), user_shop_cancel), "cancel_shop"))
                                     .toMarkup(),
-                            nutzer.getLocale(), "user.shop.item", Ausgabe.format(nutzer.getLocale(), shopItem.title()), shopItem.price(), nutzer.getPoints());
+                            nutzer.getLocale(), user_shop_item, Ausgabe.formatRaw(nutzer.getLocale(), shopItem.title()), shopItem.price(), nutzer.getPoints());
                 }
             } else {
-                ausgabe.edit(message.getChatId(), message.getMessageId(), nutzer.getLocale(), "user.shop.nomoney", Ausgabe.format(nutzer.getLocale(), shopItem.title()), shopItem.price(), nutzer.getPoints());
+                ausgabe.edit(message.getChatId(), message.getMessageId(), nutzer.getLocale(), user_shop_nomoney, Ausgabe.formatRaw(nutzer.getLocale(), shopItem.title()), shopItem.price(), nutzer.getPoints());
             }
         });
     }
@@ -723,9 +794,9 @@ public class Bot extends AbilityBot {
         if (part1.equals("+")) {
             listGroups.add(chatId);
             ausgabe.removeMessage(message.getChatId(), message.getMessageId());
-            ausgabe.sendToGroup(chatId, "group.accepted");
+            ausgabe.sendToGroup(chatId, group_accepted);
         } else if (part1.equals("-")) {
-            ausgabe.sendToGroup(chatId, "group.declined");
+            ausgabe.sendToGroup(chatId, group_declined);
             ausgabe.removeMessage(message.getChatId(), message.getMessageId());
             try {
                 sender.execute(new LeaveChat().setChatId(chatId));
@@ -778,7 +849,7 @@ public class Bot extends AbilityBot {
                 if (!nutzer.hasCooldownUpvote() && startsOrEndsWith(message.getText(), "\\u002b|\\u261d|\\ud83d\\udc46|\\ud83d\\udc4f|\\ud83d\\ude18|\\ud83d\\ude0d|\\ud83d\\udc4c|\\ud83d\\udc4d|\\ud83d\\ude38")) {
                     ziel.addVote(1);
                     nutzer.setCooldownUpvote(5, ChronoUnit.MINUTES);
-                    ausgabe.sendTempClear(message.getChatId(), nutzer.getLocale(), "vote.up", 1, ziel.getLinkedVotes(), nutzer.getLinkedVotes());
+                    ausgabe.sendTempClear(message.getChatId(), nutzer.getLocale(), vote_up, 1, ziel.getLinkedVotes(), nutzer.getLinkedVotes());
                 }
 
                 //Prüft ob die Nachricht ein Super-Upvote enthält
@@ -786,14 +857,14 @@ public class Bot extends AbilityBot {
                     int points = 2 + random.nextInt(SUPER_HONOR_MAX - 1);
                     ziel.addVote(points);
                     nutzer.setCooldownSuperUpvote(5, ChronoUnit.HOURS);
-                    ausgabe.sendTempClear(message.getChatId(), nutzer.getLocale(), "vote.super", points, ziel.getLinkedVotes(), nutzer.getLinkedVotes());
+                    ausgabe.sendTempClear(message.getChatId(), nutzer.getLocale(), vote_super, points, ziel.getLinkedVotes(), nutzer.getLinkedVotes());
                 }
 
                 //Prüft ob die Nachricht ein Downvote enthält
                 if (!nutzer.hasCooldownDownvote() && startsOrEndsWith(message.getText(), "\\u2639\\ufe0f|\\ud83d\\ude20|\\ud83d\\ude21|\\ud83e\\udd2c|\\ud83e\\udd2e|\\ud83d\\udca9|\\ud83d\\ude3e|\\ud83d\\udc4e|\\ud83d\\udc47")) {
                     ziel.removeVote(1);
                     nutzer.setCooldownDownvote(10, ChronoUnit.MINUTES);
-                    ausgabe.sendTempClear(message.getChatId(), nutzer.getLocale(), "vote.down", 1, ziel.getLinkedVotes(), nutzer.getLinkedVotes());
+                    ausgabe.sendTempClear(message.getChatId(), nutzer.getLocale(), vote_down, 1, ziel.getLinkedVotes(), nutzer.getLinkedVotes());
                 }
             }
         }
@@ -833,15 +904,15 @@ public class Bot extends AbilityBot {
         if (!ref.row.isEmpty())
             factory.addRow(ref.row);
         if (!factory.hasRows())
-            factory.addRow(InlineKeyboardFactory.button(Ausgabe.format(nutzer.getLocale(), "user.language.none"), "none"));
+            factory.addRow(InlineKeyboardFactory.button(Ausgabe.format(nutzer.getLocale(), user_language_none), "none"));
         return factory.toMarkup();
     }
 
 
     private ReplyKeyboard getMainKeyboard(Locale locale) {
         return ReplyKeyboardFactory.build()
-                .addRow(ReplyKeyboardFactory.button(Ausgabe.format(locale, "user.namechange.button")), ReplyKeyboardFactory.button(Ausgabe.format(locale, "user.language.button")))
-                .addRow(ReplyKeyboardFactory.button(Ausgabe.format(locale, "user.shop.button")))
+                .addRow(ReplyKeyboardFactory.button(Ausgabe.format(locale, user_namechange_button)), ReplyKeyboardFactory.button(Ausgabe.format(locale, user_language_button)))
+                .addRow(ReplyKeyboardFactory.button(Ausgabe.format(locale, user_shop_button)))
                 .toMarkup();
     }
 
@@ -855,7 +926,7 @@ public class Bot extends AbilityBot {
             int reward = (r.nextInt(NACHRICHT_PUNKTE_MAX) + NACHRICHT_PUNKTE_MIN);
             if (random.nextInt(JACKPOT_CHANCE) == 0) {
                 reward = reward * JACKPOT_MULTIPLIER;
-                ausgabe.sendToAllGroups("reward.jackpot", reward, nutzer.getLinkedUsername());
+                ausgabe.sendToAllGroups(reward_jackpot, reward, nutzer.getLinkedUsername());
             }
             int levelVorher = nutzer.getLevel();
             nutzer.addPoints(reward);
@@ -866,10 +937,11 @@ public class Bot extends AbilityBot {
 
     private void checkLevelUp(Nutzer nutzer, int levelVorher) {
         if (levelVorher < nutzer.getLevel()) {
+            logger.info(nutzer.getUsername()+" ist aufgestiegen +"+(nutzer.getLevel()-levelVorher)+" -> "+nutzer.getLevel());
             if (levelVorher == nutzer.getLevel() - 1) {
-                ausgabe.sendImageToAll(nutzer.getLocale(), "levelup.single", "smug.moe/smg/" + nutzer.getLevel() + ".png", nutzer.getLinkedUsername(), nutzer.getTitel());
+                ausgabe.sendImageToAll(nutzer.getLocale(), levelup_single, "smug.moe/smg/" + nutzer.getLevel() + ".png", nutzer.getLinkedUsername(), nutzer.getTitel());
             } else {
-                ausgabe.sendImageToAll(nutzer.getLocale(), "levelup.multi", "smug.moe/smg/" + nutzer.getLevel() + ".png", nutzer.getLinkedUsername(), nutzer.getTitel(), nutzer.getLevel() - levelVorher - 1);
+                ausgabe.sendImageToAll(nutzer.getLocale(), levelup_multi, "smug.moe/smg/" + nutzer.getLevel() + ".png", nutzer.getLinkedUsername(), nutzer.getTitel(), nutzer.getLevel() - levelVorher - 1);
             }
         }
     }
@@ -879,7 +951,7 @@ public class Bot extends AbilityBot {
             if (uncheckedGroups.contains(groupChat.getId())) return true;
             uncheckedGroups.add(groupChat.getId());
             ausgabe.sendOwnerGroupCheck(groupChat.getId(), groupChat.getTitle());
-            ausgabe.sendToGroup(groupChat.getId(), "group.requested");
+            ausgabe.sendToGroup(groupChat.getId(), group_requested);
             return true;
         }
         return false;
@@ -903,6 +975,123 @@ public class Bot extends AbilityBot {
         return (text.matches("^(" + regex + ")+[\\s\\S]*") || text.matches("[\\s\\S]*(" + regex + ")+$"));
     }
 
+
+    @SuppressWarnings("DuplicatedCode")
+    private BufferedImage generateStatsImage(User target) throws IOException {
+        Nutzer nutzer = nutzermanager.getNutzer(target);
+        String vorname = target.getFirstName();
+        if(vorname==null)vorname="";
+        String nachname = target.getLastName();
+        if(nachname==null)nachname="";
+        String tgname = target.getUserName();
+        if(tgname==null)tgname="";
+        String sprache = "Standard Deutsch";
+        for (Language lang : Language.values()) {
+            if (lang.locale().equals(nutzer.getLocale())) {
+                sprache = lang.title();
+            }
+        }
+        Integer punkte = nutzer.getPoints();
+        Integer level = nutzer.getLevel();
+        String username = nutzer.getUsername();
+        String titel = nutzer.getTitel();
+        Set<Language> sprachen = nutzer.getLanguages();
+        Integer votes = nutzer.getVotes();
+        // System.out.println(vorname + "\n" + nachname + "\n" + tgname + "\n" + sprache + "\n" + punkte + "\n" + level + "\n" + username + "\n" + titel + "\n" + sprachen.size() + "\n" + votes);
+        BufferedImage bild = getProfilePicture(target.getId());
+        int width = 800;
+        int height = 350;
+        int padding = 25;
+        int bildSize = height - (padding * 2);
+        int infoSize = (width - (padding * 3)) - bildSize;
+        int bildTextPadding = 15;
+        int bildTextBGMargin = 5;
+        float bildTextSize = 12;
+
+        float usernameTextSize = 42;
+        float levelTextSize = 30;
+        float punkteTextSize = 36;
+        float karmaTextSize = 36;
+        float paketeTextSize = 26;
+
+        Color c1 = new Color(114, 0, 65);
+        Color c2 = new Color(78, 0, 211);
+        Color cGray = new Color(0, 0, 0, 80);
+        Color cText = new Color(200, 200, 200);
+        Color cTag = new Color(200, 200, 200,80);
+        Font font = new Font("Arial Nova Light", Font.PLAIN, 30);
+        BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g2d = (Graphics2D) image.getGraphics();
+        g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                RenderingHints.VALUE_ANTIALIAS_ON);
+        //DRAW HINTERGRUND
+        g2d.setPaint(new GradientPaint(0, 0, c1, width, height, c2));
+        g2d.fillRect(0, 0, width, height);
+        //DRAW BILD
+        if (bild != null) {
+            g2d.drawImage(makeRoundedCorner(bild, 50), 25, 25, 300, 300, null);
+        } else {
+            g2d.setColor(cGray);
+            g2d.fillRoundRect(25, 25, 300, 300, 50, 50);
+        }
+        //DRAW BILD TEXT MIT HINTERGRUND
+        String bildText = (vorname + " " + nachname + " " + ((!tgname.isEmpty()) ? "@" : "") + tgname).strip();
+        g2d.setFont(scaleFont(bildText, bildSize - (bildTextPadding * 2), bildTextSize, g2d));
+        g2d.setColor(cGray);
+        g2d.fillRoundRect(padding + bildTextPadding-bildTextBGMargin,height - padding - bildTextPadding-g2d.getFontMetrics().getAscent()-bildTextBGMargin,g2d.getFontMetrics().stringWidth(bildText)+(bildTextBGMargin*2),g2d.getFontMetrics().getAscent()+g2d.getFontMetrics().getDescent()+(bildTextBGMargin*2),5,5);
+        g2d.setColor(cText);
+        g2d.drawString(bildText, padding + bildTextPadding, height - padding - bildTextPadding);
+        //DRAW TEXTS
+        int linepos = padding;
+
+        linepos += drawStatsText(g2d, username
+                , cText, infoSize, (padding * 2) + bildSize, usernameTextSize, linepos);
+
+        drawStatsText(g2d, "Level " + level + " - " + titel
+                , cText, infoSize, (padding * 2) + bildSize, levelTextSize, linepos);
+
+        linepos = padding + (bildSize / 3);
+
+        linepos += drawStatsText(g2d, punkte + " Punkt"+(punkte!=1?"e":"")
+                , cText, infoSize, (padding * 2) + bildSize, punkteTextSize, linepos);
+
+        drawStatsText(g2d, votes + " Karma"
+                , cText, infoSize, (padding * 2) + bildSize, karmaTextSize, linepos);
+
+        linepos = padding + ((bildSize / 3) * 2);
+
+        linepos += drawStatsText(g2d, "Sprache: " + sprache
+                , cText, infoSize, (padding * 2) + bildSize, paketeTextSize, linepos);
+
+        drawStatsText(g2d, sprachen.size() + " Sprachpaket"+(sprachen.size()!=1?"e":"")
+                , cText, infoSize, (padding * 2) + bildSize, paketeTextSize, linepos);
+
+        g2d.setColor(cTag);
+        g2d.setFont(g2d.getFont().deriveFont(12f));
+        String str="by "+getBotUsername();
+        g2d.drawString(str,(width-g2d.getFontMetrics().stringWidth(str))-5,height-5);
+
+        return image;
+    }
+
+    private BufferedImage getProfilePicture(Integer id) {
+        BufferedImage bild = null;
+        try {
+            List<List<PhotoSize>> photos = sender.execute(new GetUserProfilePhotos().setUserId(id).setLimit(1)).getPhotos();
+            if (!photos.isEmpty()) {
+                List<PhotoSize> currentPhoto = photos.get(0);
+                PhotoSize img = currentPhoto.get(currentPhoto.size() - 1);
+                File file = sender.downloadFile(getFilePath(img));
+                bild = ImageIO.read(file);
+            }
+        } catch (TelegramApiException | IOException e) {
+            e.printStackTrace();
+        }
+        return bild;
+    }
+
+
+    @SuppressWarnings("DuplicatedCode")
     private BufferedImage generateJustThingsImage(String text, String name) throws IOException {
         InputStream bgImage = getClass().getClassLoader().getResourceAsStream("images/bg" + (new Random().nextInt(4) + 1) + ".jpg");
         BufferedImage image = (bgImage == null) ? new BufferedImage(100, 100, BufferedImage.TYPE_INT_RGB) : ImageIO.read(bgImage);
@@ -933,6 +1122,65 @@ public class Bot extends AbilityBot {
         g2d.setFont(new Font("Comic Sans MS", Font.BOLD, 20));
         drawCenteredText(g2d, "#Just" + name + "Things", image.getHeight() - abstand / 2, image);
         return image;
+    }
+
+    public String getFilePath(PhotoSize photo) {
+        Objects.requireNonNull(photo);
+
+        if (photo.hasFilePath()) { // If the file_path is already present, we are done!
+            return photo.getFilePath();
+        } else { // If not, let find it
+            // We create a GetFile method and set the file_id from the photo
+            GetFile getFileMethod = new GetFile();
+            getFileMethod.setFileId(photo.getFileId());
+            try {
+                // We execute the method using AbsSender::execute method.
+                org.telegram.telegrambots.meta.api.objects.File file = sender.execute(getFileMethod);
+                // We now have the file_path
+                return file.getFilePath();
+            } catch (TelegramApiException e) {
+                e.printStackTrace();
+            }
+        }
+
+        return null; // Just in case
+    }
+
+    private int drawStatsText(Graphics2D g2d, String text, Color cText, int width, int x, float textSize, int linepos) {
+        return drawStatsText(g2d, text, cText, width, x, textSize, linepos, false);
+    }
+
+    private int drawStatsText(Graphics2D g2d, String text, Color cText, int width, int x, float textSize, int linepos, boolean useBaseline) {
+        g2d.setColor(cText);
+        g2d.setFont(scaleFont(text, width, textSize, g2d));
+        g2d.drawString(text, x, linepos + (useBaseline ? 0 : g2d.getFontMetrics().getHeight()));
+        return g2d.getFontMetrics().getHeight();
+    }
+
+    public Font scaleFont(String text, int desired_width, float fontSize, Graphics2D g) {
+        Font font = g.getFont().deriveFont(fontSize);
+        int width = g.getFontMetrics(font).stringWidth(text);
+        float newFontSize = ((float) desired_width / (float) width) * fontSize;
+        return g.getFont().deriveFont(Math.min(fontSize, newFontSize));
+    }
+
+    public static BufferedImage makeRoundedCorner(BufferedImage image, int cornerRadius) {
+        int w = image.getWidth();
+        int h = image.getHeight();
+        BufferedImage output = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
+
+        Graphics2D g2 = output.createGraphics();
+        g2.setComposite(AlphaComposite.Src);
+        g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g2.setColor(Color.WHITE);
+        g2.fill(new RoundRectangle2D.Float(0, 0, w, h, cornerRadius, cornerRadius));
+
+        g2.setComposite(AlphaComposite.SrcAtop);
+        g2.drawImage(image, 0, 0, null);
+
+        g2.dispose();
+
+        return output;
     }
 
     private static void drawCenteredText(Graphics2D g2d, String text, int y, BufferedImage image) {
